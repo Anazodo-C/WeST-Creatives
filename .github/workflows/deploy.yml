@@ -1,0 +1,40 @@
+name: Deploy to Vercel (optional)
+
+# This workflow is OFF by default in effect — it needs three repo secrets
+# before it can do anything (VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID).
+# Without them, the "Check secrets configured" step exits early and skips.
+#
+# Simpler alternative: skip this file entirely and connect your GitHub repo
+# directly in the Vercel dashboard (Import Project). Vercel then auto-deploys
+# every push on its own, no Action required. See the README for both paths.
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check secrets configured
+        id: check
+        run: |
+          if [ -n "${{ secrets.VERCEL_TOKEN }}" ] && [ -n "${{ secrets.VERCEL_ORG_ID }}" ] && [ -n "${{ secrets.VERCEL_PROJECT_ID }}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping deploy — VERCEL_TOKEN / VERCEL_ORG_ID / VERCEL_PROJECT_ID not set as repo secrets."
+          fi
+
+      - name: Checkout
+        if: steps.check.outputs.ready == 'true'
+        uses: actions/checkout@v4
+
+      - name: Deploy
+        if: steps.check.outputs.ready == 'true'
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: "--prod"

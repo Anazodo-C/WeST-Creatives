@@ -1,7 +1,10 @@
 "use client";
 
+import { createConfig, http } from "wagmi";
 import { getDefaultConfig } from "@rainbow-me/rainbowkit";
 import { arcTestnet } from "viem/chains";
+
+export { arcTestnet };
 
 /**
  * Wagmi/RainbowKit config, targeting Arc Testnet (matches the ERC-8004 +
@@ -15,26 +18,53 @@ import { arcTestnet } from "viem/chains";
  * Allowlist" — that's Reown rejecting the placeholder id below, not a bug.
  * Add your real project id, and add this app's origin(s) under that
  * project's "Allowed Origins" in the Reown dashboard, to clear it.
- *
- * `appUrl` is NOT optional in practice even though RainbowKit's types allow
- * omitting it: this file runs at module load time, on the server too (this
- * config is imported into every page via the root layout). If `appUrl` is
- * left unset, RainbowKit falls back to
- * `typeof window !== "undefined" ? window.location.origin : ""` — an empty
- * string during Next.js's server-side build/prerendering — which a
- * downstream `new URL(...)` call then throws on, breaking `next build`
- * entirely with "TypeError: Invalid URL" while prerendering `_not-found` (or
- * any other statically-generated page). Set NEXT_PUBLIC_APP_URL to your real
- * deployed domain once you have one; the hardcoded fallback below just
- * needs to be *some* valid absolute URL to keep builds working either way.
  */
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://west-creatives.vercel.app";
 
-export const web3Config = getDefaultConfig({
-  appName: "West Creatives",
-  appUrl: APP_URL,
-  appIcon: `${APP_URL}/favicon.ico`,
-  projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "00000000000000000000000000000000",
-  chains: [arcTestnet],
-  ssr: true,
-});
+/**
+ * IMPORTANT — do not call this at module scope, and do not call it
+ * server-side. `getDefaultConfig()` eagerly constructs RainbowKit's full
+ * default wallet list, including the WalletConnect and Coinbase Wallet
+ * connectors. Deep inside those SDKs (confirmed by reading
+ * @walletconnect/utils' `getAppMetadata()`), there's code that falls back to
+ * inspecting `window`/`document` for app metadata, and unconditionally
+ * calls `new URL(...)` on the result. Passing `appUrl`/`appIcon` explicitly
+ * (as done below) does NOT fully prevent this — that fallback still runs
+ * and still constructs `new URL('')` internally in one of its own
+ * comparisons, which throws server-side where `window` doesn't exist. That
+ * crashed `next build` while prerendering `/_not-found` with
+ * "TypeError: Invalid URL" even after appUrl/appIcon were set.
+ *
+ * The reliable fix is architectural, not a parameter: never let this
+ * function run anywhere but the browser, after mount. See Web3Provider.tsx,
+ * which uses `buildSsrSafeConfig()` below during SSR/first paint (zero
+ * connectors — nothing WalletConnect/Coinbase-related to construct, so
+ * nothing can throw) and swaps to this real config only in a client-only
+ * `useEffect`.
+ */
+export function buildWeb3Config() {
+  return getDefaultConfig({
+    appName: "West Creatives",
+    appUrl: APP_URL,
+    appIcon: `${APP_URL}/favicon.ico`,
+    projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "00000000000000000000000000000000",
+    chains: [arcTestnet],
+    ssr: true,
+  });
+}
+
+/**
+ * Minimal placeholder config used only until Web3Provider mounts on the
+ * client. No connectors at all — just enough for wagmi's hooks (useAccount,
+ * useConnectModal, etc.) to have a valid context to read from instead of
+ * throwing "must be used within WagmiProvider", without touching any
+ * wallet-connector SDK that might do unsafe SSR work.
+ */
+export function buildSsrSafeConfig() {
+  return createConfig({
+    chains: [arcTestnet],
+    transports: { [arcTestnet.id]: http() },
+    connectors: [],
+    ssr: true,
+  });
+}

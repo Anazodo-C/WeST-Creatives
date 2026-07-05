@@ -21,14 +21,15 @@ export async function POST(req: NextRequest) {
   // used to surface client-side as "Unexpected end of JSON input" because
   // Next's default error page isn't JSON.
   try {
-    const db = getDb();
+    const db = await getDb();
 
     // Idempotent by ownerId: re-provisioning the same owner (e.g. a wallet
     // that disconnects and reconnects, or a signup form resubmitted) reuses
     // their existing wallet instead of minting a new one every time.
-    const existing = db
-      .prepare(`SELECT id, address, blockchain, demo FROM wallets WHERE ownerId = ? ORDER BY createdAt ASC LIMIT 1`)
-      .get(parsed.data.ownerId) as { id: string; address: string; blockchain: string; demo: number } | undefined;
+    const existing = await db.get<{ id: string; address: string; blockchain: string; demo: number }>(
+      `SELECT id, address, blockchain, demo FROM wallets WHERE ownerId = ? ORDER BY createdAt ASC LIMIT 1`,
+      [parsed.data.ownerId]
+    );
 
     if (existing) {
       return NextResponse.json({
@@ -41,15 +42,16 @@ export async function POST(req: NextRequest) {
     }
 
     const wallet = await createWallet(parsed.data.label);
-    db.prepare(
-      `INSERT INTO wallets (id, ownerId, address, blockchain, demo, createdAt) VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(
-      randomUUID(),
-      parsed.data.ownerId,
-      wallet.address,
-      wallet.blockchain,
-      wallet.demo ? 1 : 0,
-      new Date().toISOString()
+    await db.run(
+      `INSERT INTO wallets (id, ownerId, address, blockchain, demo, createdAt) VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        randomUUID(),
+        parsed.data.ownerId,
+        wallet.address,
+        wallet.blockchain,
+        wallet.demo ? 1 : 0,
+        new Date().toISOString(),
+      ]
     );
 
     return NextResponse.json(wallet);

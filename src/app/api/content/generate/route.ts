@@ -34,15 +34,17 @@ export async function POST(req: NextRequest) {
   }
 
   const { agentId, ...request }: ContentRequest & { agentId?: string } = parsed.data;
-  const db = getDb();
+  const db = await getDb();
 
   const agentRow = agentId
-    ? (db.prepare("SELECT * FROM agents WHERE id = ?").get(agentId) as
-        | { id: string; walletAddress: string | null }
-        | undefined)
-    : (db
-        .prepare("SELECT * FROM agents WHERE type = ? ORDER BY score DESC LIMIT 1")
-        .get(request.modality) as { id: string; walletAddress: string | null } | undefined);
+    ? await db.get<{ id: string; walletAddress: string | null }>(
+        "SELECT * FROM agents WHERE id = ?",
+        [agentId]
+      )
+    : await db.get<{ id: string; walletAddress: string | null }>(
+        "SELECT * FROM agents WHERE type = ? ORDER BY score DESC LIMIT 1",
+        [request.modality]
+      );
 
   if (!agentRow) {
     return NextResponse.json(
@@ -60,9 +62,10 @@ export async function POST(req: NextRequest) {
     // Resolve the creator's *real* Circle wallet id (not their ownerId
     // string) — falls back to null (demo settlement) for guest sessions or
     // anyone who hasn't provisioned a wallet yet.
-    const creatorWallet = db
-      .prepare("SELECT id FROM wallets WHERE ownerId = ? ORDER BY createdAt DESC LIMIT 1")
-      .get(request.creatorId) as { id: string } | undefined;
+    const creatorWallet = await db.get<{ id: string }>(
+      "SELECT id FROM wallets WHERE ownerId = ? ORDER BY createdAt DESC LIMIT 1",
+      [request.creatorId]
+    );
 
     const settlement = await settlePaymentSplit({
       fromWalletId: creatorWallet?.id ?? null,
@@ -71,50 +74,53 @@ export async function POST(req: NextRequest) {
       totalUsdc: record.costUsdc,
     });
 
-    db.prepare(
+    await db.run(
       `INSERT INTO content_records (id, creatorId, agentId, modality, prompt, enhancedPrompt, output, evaluationJson, costUsdc, developerShareUsdc, platformShareUsdc, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      record.id,
-      record.creatorId,
-      record.agentId,
-      record.modality,
-      record.prompt,
-      record.enhancedPrompt,
-      record.output,
-      JSON.stringify(record.evaluation),
-      record.costUsdc,
-      developerShare,
-      platformShare,
-      record.createdAt
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        record.id,
+        record.creatorId,
+        record.agentId,
+        record.modality,
+        record.prompt,
+        record.enhancedPrompt,
+        record.output,
+        JSON.stringify(record.evaluation),
+        record.costUsdc,
+        developerShare,
+        platformShare,
+        record.createdAt,
+      ]
     );
 
-    db.prepare(
-      `INSERT INTO transactions (id, fromWallet, toWallet, amountUsdc, kind, createdAt, txHash) VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      randomUUID(),
-      request.creatorId,
-      agentRow.walletAddress ?? "0xdemoDeveloperWallet",
-      developerShare,
-      "developer-payout",
-      record.createdAt,
-      settlement.developerTxHash ?? null
+    await db.run(
+      `INSERT INTO transactions (id, fromWallet, toWallet, amountUsdc, kind, createdAt, txHash) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        randomUUID(),
+        request.creatorId,
+        agentRow.walletAddress ?? "0xdemoDeveloperWallet",
+        developerShare,
+        "developer-payout",
+        record.createdAt,
+        settlement.developerTxHash ?? null,
+      ]
     );
-    db.prepare(
-      `INSERT INTO transactions (id, fromWallet, toWallet, amountUsdc, kind, createdAt, txHash) VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      randomUUID(),
-      request.creatorId,
-      process.env.PLATFORM_WALLET_ADDRESS ?? "0xdemoPlatformWallet",
-      platformShare,
-      "platform-fee",
-      record.createdAt,
-      settlement.platformTxHash ?? null
+    await db.run(
+      `INSERT INTO transactions (id, fromWallet, toWallet, amountUsdc, kind, createdAt, txHash) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        randomUUID(),
+        request.creatorId,
+        process.env.PLATFORM_WALLET_ADDRESS ?? "0xdemoPlatformWallet",
+        platformShare,
+        "platform-fee",
+        record.createdAt,
+        settlement.platformTxHash ?? null,
+      ]
     );
 
-    db.prepare(
-      `UPDATE agents SET transactionCount = transactionCount + 1 WHERE id = ?`
-    ).run(agentRow.id);
+    await db.run(`UPDATE agents SET transactionCount = transactionCount + 1 WHERE id = ?`, [
+      agentRow.id,
+    ]);
 
     return NextResponse.json({
       ...record,

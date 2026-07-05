@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
   }
 
   const { email, message } = parsed.data;
-  const db = getDb();
+  const db = await getDb();
   let delivered = false;
 
   if (RESEND_API_KEY) {
@@ -42,9 +42,10 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  db.prepare(
-    `INSERT INTO contact_messages (id, email, message, delivered, createdAt) VALUES (?, ?, ?, ?, ?)`
-  ).run(randomUUID(), email, message, delivered ? 1 : 0, new Date().toISOString());
+  await db.run(
+    `INSERT INTO contact_messages (id, email, message, delivered, createdAt) VALUES (?, ?, ?, ?, ?)`,
+    [randomUUID(), email, message, delivered ? 1 : 0, new Date().toISOString()]
+  );
 
   return NextResponse.json({
     ok: true,

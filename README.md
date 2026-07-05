@@ -19,8 +19,10 @@ Circle Gateway (x402). Built for the Canteen x Lepton Hackathon.
 - **Payments & identity** — `src/lib/circle.ts` (wallets + nanopayment split),
   `src/lib/arc.ts` (ERC-8004 IdentityRegistry reads), `scripts/register-agent.ts`
   (onchain registration).
-- **Data** — local SQLite via Node's built-in `node:sqlite` (no native build
-  step, no external DB to stand up). Auto-seeded with 5 demo agents on first run.
+- **Data** — local SQLite via Node's built-in `node:sqlite` by default (no
+  native build step, no external DB to stand up), or real Postgres (e.g.
+  Railway) when `DATABASE_URL` is set — same code path either way (`src/lib/db.ts`).
+  Auto-seeded with 5 demo agents on first run.
 
 Every external integration (Circle, Anthropic, Google, ElevenLabs) has a demo
 fallback, so `npm run dev` is fully clickable with zero keys. Add real keys to
@@ -116,29 +118,64 @@ https://<your-vercel-domain>/api/auth/callback/google
 Add the matching Authorized JavaScript origins (`http://localhost:3000` and
 your Vercel domain, no path).
 
-## Deploying
+## Database: Railway Postgres (recommended before deploying)
 
-Two ways to get this live — pick one:
+Locally, SQLite just works with zero setup — skip this section for `npm run
+dev`. But Vercel's filesystem is wiped on every deploy, so if you deploy
+without a real database, every push resets all agents/wallets/content history
+back to the 5 seed agents. Railway's free Postgres plugin fixes that in about
+two minutes:
 
-**A. Vercel's GitHub integration (recommended, zero YAML to think about)**
-Push this repo to GitHub (see below), then in Vercel: New Project → Import
-your GitHub repo → add the environment variables from `.env.example` → Deploy.
-Every future push to `main` auto-deploys, no GitHub Action needed for this part.
+1. Go to [railway.app](https://railway.app) → sign in (GitHub login is
+   fastest) → **New Project** → **Provision PostgreSQL**.
+2. Click into the new Postgres service → **Variables** tab → copy the value
+   of `DATABASE_URL` (it looks like `postgresql://postgres:<password>@<host>.railway.app:<port>/railway`).
+3. Paste it into your local `.env` as `DATABASE_URL=...` and restart `npm run
+   dev` — the app will now read/write that Postgres database instead of the
+   local SQLite file (it creates its tables and seeds the 5 demo agents
+   automatically on first connect, same as SQLite does).
+4. Add the same `DATABASE_URL` to Vercel (Project Settings → Environment
+   Variables) before or after your first deploy — see below.
 
-**B. Vercel CLI**
-```bash
-npm i -g vercel
-vercel
-```
+You do not need to run any app code *on* Railway — it's only hosting the
+database here. The app itself still deploys to Vercel.
 
-Either way, add every variable from `.env.example` that you're using as a
-Vercel Environment Variable (Project Settings → Environment Variables) —
-anything left unset just runs in demo mode, which is safe but won't move real
-funds, call real model APIs, or support real sign-in.
+## Deploying to Vercel (first time)
 
-`node:sqlite` works on Vercel's Node runtime, but its filesystem is
-ephemeral per deployment — fine for a hackathon demo, but swap in Postgres/
-Turso/PlanetScale before this needs to persist across deploys.
+1. **Push this repo to GitHub**, if you haven't yet:
+   ```bash
+   git remote add origin https://github.com/<your-username>/<repo-name>.git
+   git branch -M main
+   git push -u origin main
+   ```
+   (Create the empty repo first at github.com/new — don't initialize it with
+   a README/license, since this repo already has its own history.)
+
+2. Go to [vercel.com](https://vercel.com) → sign in with GitHub → **Add New**
+   → **Project** → select this repo from the list → **Import**.
+
+3. Vercel auto-detects Next.js; leave the build settings as default.
+
+4. Before clicking Deploy, open **Environment Variables** and add every key
+   from `.env.example` that you actually have a value for — at minimum
+   `DATABASE_URL` (from Railway above) so data persists. Everything else
+   (Circle, Anthropic, Google, ElevenLabs, NextAuth, Resend, WalletConnect)
+   is optional — anything left unset just runs in demo mode, which is safe
+   but won't move real funds, call real model APIs, or support real sign-in.
+   For `NEXTAUTH_URL`, use your Vercel domain (e.g.
+   `https://west-creatives.vercel.app`) instead of `localhost`.
+
+5. Click **Deploy**. First build takes ~1-2 minutes. You'll get a live URL
+   when it finishes.
+
+6. If you set up Google sign-in or WalletConnect, go back and add your new
+   Vercel domain to their allowed redirect URIs / origins (see the Google
+   sign-in and Reown sections above) — those are keyed to specific URLs, so
+   they need updating after you know your real domain.
+
+From here, every future `git push` to `main` auto-deploys — no extra setup,
+and no GitHub Action needed for this part (that's what `.github/workflows/deploy.yml`
+below is an alternative to, not something you need in addition to this).
 
 ## GitHub Actions
 

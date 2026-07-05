@@ -36,17 +36,16 @@ export async function POST(req: NextRequest) {
   // uncaught throw produce Next's non-JSON error page, which is what broke
   // the client's res.json() call.
   try {
-    const db = getDb();
+    const db = await getDb();
 
     // A creator's personal director agent is a singleton: re-running signup
     // provisioning for the same developerId (e.g. a wallet reconnecting)
     // should return their existing personal agent, not mint a duplicate.
     if (data.visibility === "personal") {
-      const existing = db
-        .prepare(
-          `SELECT id, walletAddress FROM agents WHERE developerId = ? AND visibility = 'personal' LIMIT 1`
-        )
-        .get(data.developerId) as { id: string; walletAddress: string | null } | undefined;
+      const existing = await db.get<{ id: string; walletAddress: string | null }>(
+        `SELECT id, walletAddress FROM agents WHERE developerId = ? AND visibility = 'personal' LIMIT 1`,
+        [data.developerId]
+      );
 
       if (existing) {
         return NextResponse.json({
@@ -62,26 +61,27 @@ export async function POST(req: NextRequest) {
     const id = randomUUID();
     const wallet = await createWallet(`agent-${data.name}`);
 
-    db.prepare(
+    await db.run(
       `INSERT INTO agents (id, name, developerId, description, type, capabilities, model, nicheSocialMedia, nicheIndustry, modality, scope, generationParadigm, rank, score, transactionCount, priceUsdc, walletAddress, visibility, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 50, 0, ?, ?, ?, ?)`
-    ).run(
-      id,
-      data.name,
-      data.developerId,
-      data.description,
-      data.type,
-      JSON.stringify(data.capabilities),
-      data.model,
-      data.nicheSocialMedia ?? null,
-      data.nicheIndustry ?? null,
-      data.modality,
-      data.scope,
-      data.generationParadigm,
-      data.priceUsdc,
-      wallet.address,
-      data.visibility,
-      new Date().toISOString()
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 50, 0, ?, ?, ?, ?)`,
+      [
+        id,
+        data.name,
+        data.developerId,
+        data.description,
+        data.type,
+        JSON.stringify(data.capabilities),
+        data.model,
+        data.nicheSocialMedia ?? null,
+        data.nicheIndustry ?? null,
+        data.modality,
+        data.scope,
+        data.generationParadigm,
+        data.priceUsdc,
+        wallet.address,
+        data.visibility,
+        new Date().toISOString(),
+      ]
     );
 
     return NextResponse.json({

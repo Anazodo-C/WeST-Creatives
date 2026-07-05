@@ -40,10 +40,11 @@ async function main() {
     process.exit(1);
   }
 
-  const db = getDb();
-  const agent = db.prepare("SELECT * FROM agents WHERE id = ?").get(agentId) as
-    | { id: string; name: string; walletAddress: string | null }
-    | undefined;
+  const db = await getDb();
+  const agent = await db.get<{ id: string; name: string; walletAddress: string | null }>(
+    "SELECT * FROM agents WHERE id = ?",
+    [agentId]
+  );
 
   if (!agent) {
     console.error(`No agent found in local DB with id ${agentId}`);

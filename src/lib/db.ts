@@ -53,6 +53,10 @@ const SCHEMA_SQL = `
     -- their own X page where completed work is posted) — schema is ready,
     -- posting automation is not yet wired (see README roadmap note).
     xHandle TEXT,
+    -- ERC-8004 IdentityRegistry tokenId, set once npm run register-agent (or
+    -- register-seed-agents) successfully mints this agent's onchain
+    -- identity on Arc Testnet. NULL until then.
+    onchainAgentId TEXT,
     createdAt TEXT NOT NULL
   );
 
@@ -140,6 +144,10 @@ async function initPostgres(connectionString: string): Promise<DbClient> {
   // Run the full multi-statement schema in one go (no params, so pg's
   // simple query protocol accepts the `;`-separated statements directly).
   await pool.query(SCHEMA_SQL);
+  // CREATE TABLE IF NOT EXISTS is a no-op for tables that already existed
+  // before onchainAgentId was added — patch it in for any database created
+  // by an earlier version of this file. Ignored if it's already there.
+  await pool.query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS onchainAgentId TEXT").catch(() => {});
 
   const client: DbClient = {
     async get(sql, params = []) {
@@ -168,6 +176,14 @@ async function initSqlite(): Promise<DbClient> {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   const db = new DatabaseSync(path.join(DATA_DIR, "vibe.db"));
   db.exec(SCHEMA_SQL);
+  // Same patch as the Postgres branch, for local .data/vibe.db files created
+  // before onchainAgentId existed. SQLite has no "ADD COLUMN IF NOT EXISTS",
+  // so just swallow the "duplicate column name" error if it's already there.
+  try {
+    db.exec("ALTER TABLE agents ADD COLUMN onchainAgentId TEXT");
+  } catch {
+    // already exists — fine
+  }
 
   const client: DbClient = {
     // node:sqlite's DatabaseSync is synchronous under the hood; wrapped in

@@ -62,33 +62,53 @@ and put the project id in `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` in `.env`.
 
 **Never commit `.env`.** It's already gitignored.
 
-### Registering an agent onchain
-
-After a developer registers an agent from the Dashboard (stored locally with
-a Circle wallet), anchor its identity on Arc Testnet's ERC-8004 IdentityRegistry:
-
-```bash
-npm run register-agent -- --agentId=<id-from-agents-table>
-```
-
-Requires `CIRCLE_API_KEY` + `CIRCLE_ENTITY_SECRET`. Prints a dry-run plan
-without them.
-
-### Provisioning real wallets for the 5 seed agents
+### Provisioning the 5 seed agents (wallets + onchain identity)
 
 The marketplace ships seeded with 5 demo agents (Nova Director, Lumen Frame,
-Reel Runner, Echo Voice, Caption Wolf) with `walletAddress: null` until real
-wallets are created for them. To give them real Arc Testnet wallets:
+Reel Runner, Echo Voice, Caption Wolf) with `walletAddress: null` and no
+onchain identity until you run this once. Four steps, in order:
 
-```bash
-node scripts/provision-seed-wallets.mjs
-```
+1. **Create their real Circle wallets:**
+   ```bash
+   node scripts/provision-seed-wallets.mjs
+   ```
+   Reads `CIRCLE_API_KEY`/`CIRCLE_ENTITY_SECRET` from `.env`, creates 5 real
+   developer-controlled wallets on Arc Testnet, and prints each agent's
+   address.
 
-This reads `CIRCLE_API_KEY`/`CIRCLE_ENTITY_SECRET` from `.env` and creates 5
-real developer-controlled wallets, printing each agent's address. Paste those
-addresses into the `demoAgents` array in `src/lib/db.ts` (replace the `null`
-`walletAddress` fields) so every fresh environment — local, CI, Vercel — seeds
-with the same real, persistent addresses instead of generating throwaway ones.
+2. **Paste those addresses** into the `demoAgents` array in `src/lib/db.ts`
+   (replace the `null` `walletAddress` fields), so every fresh environment —
+   local, CI, Vercel — seeds with the same real, persistent addresses
+   instead of generating throwaway ones.
+
+3. **Seed the database** by starting the app once (`npm run dev`, load any
+   page) — this inserts the 5 agents with their real wallet addresses and
+   assigns each a local database id.
+
+4. **Register their onchain identity** on Arc Testnet's ERC-8004
+   IdentityRegistry, all 5 in one pass:
+   ```bash
+   npm run register-seed-agents
+   ```
+   For each agent this builds its own metadata (name, description, type,
+   capabilities, model, niche, score, price) as a self-contained
+   `data:application/json` URI — no IPFS pinning service or live domain
+   needed — then calls `register(metadataURI)` via Circle's Contract
+   Execution API (gas sponsored by Circle's Gas Station), polls until
+   confirmed, and saves the minted tokenId back to that agent's
+   `onchainAgentId` column. Safe to re-run: agents that already have an
+   `onchainAgentId` are skipped, and one agent failing doesn't stop the
+   others.
+
+   To register a single agent instead (e.g. one a developer registers later
+   from the Dashboard, not one of the 5 seed agents):
+   ```bash
+   npm run register-agent -- --agentId=<id-from-agents-table>
+   ```
+
+Both registration commands require `CIRCLE_API_KEY` + `CIRCLE_ENTITY_SECRET`
+and print a dry-run plan (including a preview of the generated metadata)
+without them.
 
 **On "wallet keys":** Circle's developer-controlled wallets don't have a
 separate private key per wallet that gets handed to you — Circle custodies
@@ -97,6 +117,14 @@ signing server-side, and access to *every* wallet created under your account
 `CIRCLE_ENTITY_SECRET` pair already in your `.env`. Whoever holds those two
 values controls all of it; there's nothing further to extract or hand over
 per agent.
+
+**Reputation & validation (not yet wired):** `src/lib/arc.ts` already has
+`ERC8004_CONTRACTS.reputationRegistry` and `.validationRegistry` addresses
+(confirmed current against Arc's own docs). The natural next step — writing
+`feedback()` attestations from real transaction outcomes into
+ReputationRegistry, and wiring up ValidationRegistry's request/response flow
+— isn't implemented yet; the contract addresses are there and correct, but
+nothing calls them.
 
 ## Google sign-in (NextAuth)
 

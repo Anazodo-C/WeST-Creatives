@@ -37,4 +37,13 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
-          NEXTAUTH_URL: ${{ secrets.NEXTAUTH_URL }}
+          # Falls back to a real (if unused) URL when the secret isn't set.
+          # Referencing an unconfigured secret via ${{ secrets.X }} sets the
+          # env var to an EMPTY STRING, not "undefined" - and next-auth's
+          # own parseUrl() does `url ?? defaultUrl` internally, which only
+          # falls back on null/undefined, not on "". An empty NEXTAUTH_URL
+          # therefore hits `new URL("")` at module-load time (inside
+          # next-auth/react, imported by every page via the root layout)
+          # and crashes `next build` with "TypeError: Invalid URL" while
+          # prerendering _not-found - this is what was actually breaking CI.
+          NEXTAUTH_URL: ${{ secrets.NEXTAUTH_URL || 'http://localhost:3000' }}

@@ -106,6 +106,17 @@ per agent.
 string — generate one with `openssl rand -base64 32`), and `NEXTAUTH_URL`
 (`http://localhost:3000` locally).
 
+**Important:** `NEXTAUTH_URL` must be either a real URL or genuinely absent
+— never present-but-blank. next-auth reads it at module load time (before
+any page even renders) and only falls back to a default when the variable
+is completely unset; an *empty string* value is treated as "set" and
+crashes with `TypeError: Invalid URL`. This bit us in CI: referencing an
+unconfigured GitHub secret via `${{ secrets.NEXTAUTH_URL }}` sets the env
+var to `""`, not "undefined" — fixed in `.github/workflows/ci.yml` with a
+`|| 'http://localhost:3000'` fallback. The same applies on Vercel: either
+set `NEXTAUTH_URL` to your real deployed URL, or don't add the key at all
+— don't add it with an empty value.
+
 In Google Cloud Console, on your OAuth 2.0 Client ID, add **both** of these
 under Authorized redirect URIs (you can list more than one on the same
 credential — no need for separate credentials per environment):

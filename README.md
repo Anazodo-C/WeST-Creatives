@@ -184,20 +184,18 @@ database here. The app itself still deploys to Vercel.
    sign-in and Reown sections above) — those are keyed to specific URLs, so
    they need updating after you know your real domain.
 
-From here, every future `git push` to `main` auto-deploys — no extra setup,
-and no GitHub Action needed for this part (that's what `.github/workflows/deploy.yml`
-below is an alternative to, not something you need in addition to this).
+From here, every future `git push` to `main` auto-deploys — Vercel's own
+GitHub integration handles this on its own, no GitHub Action involved.
 
 ## GitHub Actions
 
 - `.github/workflows/ci.yml` — runs on every push/PR to `main`: installs and
   builds the project. Runs fine with zero secrets configured (demo-mode
   fallbacks), or add the same-named repo secrets to build against real keys.
-- `.github/workflows/deploy.yml` — optional Vercel deploy via Action. Inert
-  until you add `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` as repo
-  secrets (run `vercel link` once locally to get the org/project IDs). Most
-  people don't need this file at all — option A above (Vercel's native GitHub
-  integration) does the same job with no secrets to manage.
+
+There's no separate deploy workflow — Vercel's native GitHub integration
+above already deploys on every push, so a second, Action-based path to the
+same result would just be redundant.
 
 ## Marketplace visibility
 

@@ -118,13 +118,45 @@ signing server-side, and access to *every* wallet created under your account
 values controls all of it; there's nothing further to extract or hand over
 per agent.
 
-**Reputation & validation (not yet wired):** `src/lib/arc.ts` already has
-`ERC8004_CONTRACTS.reputationRegistry` and `.validationRegistry` addresses
-(confirmed current against Arc's own docs). The natural next step — writing
-`feedback()` attestations from real transaction outcomes into
-ReputationRegistry, and wiring up ValidationRegistry's request/response flow
-— isn't implemented yet; the contract addresses are there and correct, but
-nothing calls them.
+### Reputation & validation (ERC-8004)
+
+**Reputation feedback is automatic.** Every time `/api/content/generate`
+produces content for an agent that has an `onchainAgentId` (i.e. it's been
+through the registration steps above), the app writes the LLM-as-judge
+evaluation score onchain via ReputationRegistry's `giveFeedback()` — no extra
+command needed. Per ERC-8004, an agent can't record reputation for itself, so
+this is signed by a dedicated **platform validator wallet**
+(`src/lib/platformWallet.ts`), created lazily on first use the same way any
+other wallet in this app is (a row in `wallets`, keyed by the sentinel
+ownerId `platform-validator`) — standing in for the platform's own evaluation
+as the external observer the spec requires. This never blocks or fails a
+content request: in demo mode, or if the write fails for any reason, the
+result is just recorded as `reputationWarning` on the response and in
+`content_records`, same fallback pattern as payment settlement.
+
+**Validation is a two-step, on-demand flow** (an agent owner asking a
+validator to review the agent, e.g. a quality/KYC-style check — not
+something that fires automatically per request):
+
+```bash
+# Step 1 — agent owner wallet requests validation
+npm run validate-agent -- request --agentId=<id-from-agents-table>
+
+# Step 2 — validator wallet responds (100 = passed, 0 = failed)
+npm run validate-agent -- respond --requestId=<id-printed-by-step-1>
+```
+
+By default the platform validator wallet plays the validator role in step 2
+as well, so both steps work out of the box with just `CIRCLE_API_KEY` +
+`CIRCLE_ENTITY_SECRET` set. Each request is tracked in a local `validations`
+table (`requestHash`, both wallet addresses, both tx hashes) so `respond` can
+look up everything it needs from the id `request` printed. Without Circle
+keys, both subcommands print a dry-run plan and exit.
+
+Read-only lookups against either registry: `resolveAgentIdentity()` /
+`getValidationStatus()` in `src/lib/arc.ts` work with just an RPC connection
+— no Circle keys needed — since they're plain contract view calls via
+`viem`.
 
 ## Google sign-in (NextAuth)
 

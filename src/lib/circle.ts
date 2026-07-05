@@ -7,6 +7,8 @@
  * every call below to the real Circle Developer Console APIs on Arc Testnet.
  */
 import { randomUUID } from "node:crypto";
+import { keccak256, toHex } from "viem";
+import { ERC8004_CONTRACTS } from "./arc";
 
 const CIRCLE_API_KEY = process.env.CIRCLE_API_KEY;
 const CIRCLE_ENTITY_SECRET = process.env.CIRCLE_ENTITY_SECRET;
@@ -163,4 +165,176 @@ export async function settlePaymentSplit(params: {
       warning: err instanceof Error ? err.message : "Settlement failed, recorded as unsettled.",
     };
   }
+}
+
+export interface ContractCallResult {
+  txHash?: string;
+  demo: boolean;
+  warning?: string;
+}
+
+/**
+ * Poll a Circle Contract Execution transaction until it lands COMPLETE or
+ * FAILED. Shared by every write below (and by scripts/register-agent.ts's
+ * IdentityRegistry.register() call) so there's one polling loop instead of
+ * a copy per call site.
+ */
+async function pollTransaction(
+  client: NonNullable<Awaited<ReturnType<typeof getClient>>>,
+  txId: string,
+  label: string
+): Promise<string> {
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const { data } = (await client.getTransaction({ id: txId })) as {
+      data?: { transaction?: { state?: string; txHash?: string } };
+    };
+    if (data?.transaction?.state === "COMPLETE") {
+      return data.transaction.txHash ?? "";
+    }
+    if (data?.transaction?.state === "FAILED") {
+      throw new Error(`${label} transaction failed`);
+    }
+  }
+  throw new Error(`Timed out waiting for ${label} confirmation — check the Circle console.`);
+}
+
+/**
+ * Generic ERC-8004 contract write via Circle's Contract Execution API
+ * (Gas Station-sponsored, same pattern as scripts/register-agent.ts's
+ * IdentityRegistry.register() call). Never throws — every caller below
+ * (reputation feedback, validation request/response) should degrade to a
+ * recorded-but-unsettled demo result instead of failing the request that
+ * triggered it.
+ */
+export async function executeContractCall(params: {
+  walletAddress: string;
+  contractAddress: string;
+  abiFunctionSignature: string;
+  abiParameters: (string | number)[];
+  label: string;
+}): Promise<ContractCallResult> {
+  const client = await getClient();
+  if (!client) return { demo: true };
+
+  try {
+    const tx = await client.createContractExecutionTransaction({
+      walletAddress: params.walletAddress,
+      blockchain: "ARC-TESTNET",
+      contractAddress: params.contractAddress,
+      abiFunctionSignature: params.abiFunctionSignature,
+      abiParameters: params.abiParameters,
+      fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+    } as never);
+
+    const txId = (tx as { data?: { id?: string } })?.data?.id;
+    if (!txId) throw new Error("Circle did not return a transaction id");
+    const txHash = await pollTransaction(client, txId, params.label);
+    return { txHash, demo: false };
+  } catch (err) {
+    return {
+      demo: true,
+      warning:
+        err instanceof Error
+          ? `${params.label} failed, recorded as unsettled: ${err.message}`
+          : `${params.label} failed, recorded as unsettled.`,
+    };
+  }
+}
+
+export interface FeedbackResult extends ContractCallResult {
+  feedbackHash?: `0x${string}`;
+}
+
+/**
+ * Record onchain reputation feedback for an agent via ERC-8004's
+ * ReputationRegistry.giveFeedback(uint256,int128,uint8,string,string,string,string,bytes32).
+ *
+ * Per ERC-8004, agent owners cannot record reputation for their own agents —
+ * `validatorWalletAddress` must be a wallet other than the agent's own owner
+ * wallet. West Creatives uses a dedicated "platform validator" wallet for
+ * this (see getOrCreatePlatformValidatorWallet in src/lib/platformWallet.ts),
+ * standing in for the platform's own LLM-as-judge evaluation as the external
+ * observer of the agent's work.
+ *
+ * `score` is 0-100, matching this app's EvaluationResult.score scale directly
+ * (Arc's own docs use the same 0-100 convention in their giveFeedback
+ * example). Never throws.
+ */
+export async function giveFeedback(params: {
+  validatorWalletAddress: string;
+  agentTokenId: string;
+  score: number;
+  tag: string;
+}): Promise<FeedbackResult> {
+  const feedbackHash = keccak256(toHex(params.tag));
+  const result = await executeContractCall({
+    walletAddress: params.validatorWalletAddress,
+    contractAddress: ERC8004_CONTRACTS.reputationRegistry,
+    abiFunctionSignature: "giveFeedback(uint256,int128,uint8,string,string,string,string,bytes32)",
+    abiParameters: [params.agentTokenId, params.score.toString(), "0", params.tag, "", "", "", feedbackHash],
+    label: "giveFeedback",
+  });
+  return { ...result, feedbackHash };
+}
+
+export interface ValidationRequestResult extends ContractCallResult {
+  requestHash: `0x${string}`;
+}
+
+/**
+ * Step 1 of ERC-8004 validation: the agent's OWNER wallet asks a specific
+ * validator wallet to review it (e.g. a quality/KYC-style check). Called
+ * from the agent's own wallet, per
+ * ValidationRegistry.validationRequest(address,uint256,string,bytes32).
+ *
+ * `requestSeed` is hashed into the on-chain requestHash and must be unique
+ * per request (the same requestHash can only be used once) — include a
+ * timestamp or nonce, e.g. `validation_${agentTokenId}_${Date.now()}`.
+ */
+export async function requestValidation(params: {
+  ownerWalletAddress: string;
+  validatorAddress: string;
+  agentTokenId: string;
+  requestURI: string;
+  requestSeed: string;
+}): Promise<ValidationRequestResult> {
+  const requestHash = keccak256(toHex(params.requestSeed));
+  const result = await executeContractCall({
+    walletAddress: params.ownerWalletAddress,
+    contractAddress: ERC8004_CONTRACTS.validationRegistry,
+    abiFunctionSignature: "validationRequest(address,uint256,string,bytes32)",
+    abiParameters: [params.validatorAddress, params.agentTokenId, params.requestURI, requestHash],
+    label: "validationRequest",
+  });
+  return { ...result, requestHash };
+}
+
+/**
+ * Step 2 of ERC-8004 validation: the validator wallet responds to a pending
+ * request referencing the same requestHash from step 1. `response` follows
+ * Arc's docs convention (100 = passed, 0 = failed). Called from the
+ * validator wallet, per
+ * ValidationRegistry.validationResponse(bytes32,uint8,string,bytes32,string).
+ */
+export async function submitValidationResponse(params: {
+  validatorWalletAddress: string;
+  requestHash: `0x${string}`;
+  response: number;
+  responseURI?: string;
+  tag: string;
+}): Promise<ContractCallResult> {
+  return executeContractCall({
+    walletAddress: params.validatorWalletAddress,
+    contractAddress: ERC8004_CONTRACTS.validationRegistry,
+    abiFunctionSignature: "validationResponse(bytes32,uint8,string,bytes32,string)",
+    abiParameters: [
+      params.requestHash,
+      params.response.toString(),
+      params.responseURI ?? "",
+      `0x${"0".repeat(64)}`,
+      params.tag,
+    ],
+    label: "validationResponse",
+  });
 }

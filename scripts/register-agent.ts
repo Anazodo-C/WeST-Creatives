@@ -25,6 +25,7 @@
  */
 import { getDb } from "../src/lib/db";
 import { ERC8004_CONTRACTS, findLatestAgentIdForOwner } from "../src/lib/arc";
+import { executeContractCall } from "../src/lib/circle";
 
 const CIRCLE_API_KEY = process.env.CIRCLE_API_KEY;
 const CIRCLE_ENTITY_SECRET = process.env.CIRCLE_ENTITY_SECRET;
@@ -78,47 +79,20 @@ export async function registerAgentOnchain(
 
   const metadataUri = metadataUriOverride ?? buildAgentMetadataUri(agent);
 
-  const { initiateDeveloperControlledWalletsClient } = await import(
-    "@circle-fin/developer-controlled-wallets"
-  );
-  const client = initiateDeveloperControlledWalletsClient({
-    apiKey: CIRCLE_API_KEY,
-    entitySecret: CIRCLE_ENTITY_SECRET,
-  });
-
   console.log(`Registering "${agent.name}" on IdentityRegistry...`);
-  const registerTx = await client.createContractExecutionTransaction({
+  const result = await executeContractCall({
     walletAddress: agent.walletAddress,
-    blockchain: "ARC-TESTNET",
     contractAddress: ERC8004_CONTRACTS.identityRegistry,
     abiFunctionSignature: "register(string)",
     abiParameters: [metadataUri],
-    fee: { type: "level", config: { feeLevel: "MEDIUM" } },
-  } as never);
+    label: "register",
+  });
 
-  const txId = (registerTx as { data?: { id?: string } })?.data?.id;
-  let txHash: string | undefined;
-
-  for (let i = 0; i < 30; i++) {
-    await new Promise((r) => setTimeout(r, 2000));
-    const { data } = (await client.getTransaction({ id: txId! })) as {
-      data?: { transaction?: { state?: string; txHash?: string } };
-    };
-    if (data?.transaction?.state === "COMPLETE") {
-      txHash = data.transaction.txHash;
-      break;
-    }
-    if (data?.transaction?.state === "FAILED") {
-      throw new Error("Registration transaction failed");
-    }
-    process.stdout.write(".");
+  if (result.demo || !result.txHash) {
+    throw new Error(result.warning ?? "Registration transaction failed or timed out.");
   }
 
-  if (!txHash) {
-    throw new Error("Timed out waiting for confirmation — check the Circle console.");
-  }
-
-  console.log(`\nRegistered: https://testnet.arcscan.app/tx/${txHash}`);
+  console.log(`Registered: https://testnet.arcscan.app/tx/${result.txHash}`);
 
   const agentTokenId = await findLatestAgentIdForOwner(agent.walletAddress as `0x${string}`);
   if (agentTokenId === null) {

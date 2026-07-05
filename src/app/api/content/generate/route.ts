@@ -3,7 +3,8 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { getDb } from "@/lib/db";
 import { runDirector } from "@/lib/agents/director";
-import { settlePaymentSplit } from "@/lib/circle";
+import { settlePaymentSplit, giveFeedback } from "@/lib/circle";
+import { getOrCreatePlatformValidatorWallet } from "@/lib/platformWallet";
 import type { ContentRequest } from "@/lib/types";
 
 const bodySchema = z.object({
@@ -37,11 +38,11 @@ export async function POST(req: NextRequest) {
   const db = await getDb();
 
   const agentRow = agentId
-    ? await db.get<{ id: string; walletAddress: string | null }>(
+    ? await db.get<{ id: string; walletAddress: string | null; onchainAgentId: string | null }>(
         "SELECT * FROM agents WHERE id = ?",
         [agentId]
       )
-    : await db.get<{ id: string; walletAddress: string | null }>(
+    : await db.get<{ id: string; walletAddress: string | null; onchainAgentId: string | null }>(
         "SELECT * FROM agents WHERE type = ? ORDER BY score DESC LIMIT 1",
         [request.modality]
       );
@@ -74,9 +75,33 @@ export async function POST(req: NextRequest) {
       totalUsdc: record.costUsdc,
     });
 
+    // Record this generation's evaluation as onchain reputation feedback for
+    // the sub-agent, via ERC-8004's ReputationRegistry — but only once the
+    // agent actually has an onchain identity (npm run register-agent /
+    // register-seed-agents), and never let this block or fail the response;
+    // a reputation write is a side effect, not something a creator's content
+    // request should ever 500 over.
+    let reputationTxHash: string | undefined;
+    let reputationWarning: string | undefined;
+    if (agentRow.onchainAgentId) {
+      try {
+        const validatorWallet = await getOrCreatePlatformValidatorWallet();
+        const feedback = await giveFeedback({
+          validatorWalletAddress: validatorWallet.address,
+          agentTokenId: agentRow.onchainAgentId,
+          score: record.evaluation.score,
+          tag: `${record.modality}-generation`,
+        });
+        reputationTxHash = feedback.txHash;
+        reputationWarning = feedback.demo ? feedback.warning ?? validatorWallet.warning : undefined;
+      } catch (err) {
+        reputationWarning = err instanceof Error ? err.message : "Reputation feedback failed.";
+      }
+    }
+
     await db.run(
-      `INSERT INTO content_records (id, creatorId, agentId, modality, prompt, enhancedPrompt, output, evaluationJson, costUsdc, developerShareUsdc, platformShareUsdc, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO content_records (id, creatorId, agentId, modality, prompt, enhancedPrompt, output, evaluationJson, costUsdc, developerShareUsdc, platformShareUsdc, reputationTxHash, reputationWarning, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         record.id,
         record.creatorId,
@@ -89,6 +114,8 @@ export async function POST(req: NextRequest) {
         record.costUsdc,
         developerShare,
         platformShare,
+        reputationTxHash ?? null,
+        reputationWarning ?? null,
         record.createdAt,
       ]
     );
@@ -128,6 +155,8 @@ export async function POST(req: NextRequest) {
       platformShareUsdc: platformShare,
       settlementDemo: settlement.demo,
       settlementWarning: settlement.warning,
+      reputationTxHash,
+      reputationWarning,
     });
   } catch (err) {
     return NextResponse.json(

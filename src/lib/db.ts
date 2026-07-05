@@ -80,6 +80,12 @@ const SCHEMA_SQL = `
     costUsdc REAL,
     developerShareUsdc REAL,
     platformShareUsdc REAL,
+    -- ERC-8004 ReputationRegistry.giveFeedback() tx hash for this generation's
+    -- evaluation score, once written onchain via the platform validator
+    -- wallet (src/lib/platformWallet.ts). NULL in demo mode or if the write
+    -- failed (see reputationWarning).
+    reputationTxHash TEXT,
+    reputationWarning TEXT,
     createdAt TEXT NOT NULL
   );
 
@@ -100,6 +106,29 @@ const SCHEMA_SQL = `
     blockchain TEXT,
     demo INTEGER DEFAULT 1,
     createdAt TEXT NOT NULL
+  );
+
+  -- ERC-8004 ValidationRegistry request/response tracking. One row per
+  -- validationRequest() call; requestTxHash/responseTxHash/response are
+  -- filled in as scripts/validate-agent.ts progresses through the two-step
+  -- flow (request from the agent owner wallet, response from the validator
+  -- wallet). requestHash is the same bytes32 the onchain contract keys on,
+  -- so getValidationStatus(requestHash) can always be cross-checked against
+  -- this row.
+  CREATE TABLE IF NOT EXISTS validations (
+    id TEXT PRIMARY KEY,
+    agentId TEXT NOT NULL,
+    agentTokenId TEXT NOT NULL,
+    requestHash TEXT NOT NULL,
+    ownerWalletAddress TEXT,
+    validatorWalletAddress TEXT,
+    requestURI TEXT,
+    requestTxHash TEXT,
+    response INTEGER,
+    responseTag TEXT,
+    responseTxHash TEXT,
+    createdAt TEXT NOT NULL,
+    respondedAt TEXT
   );
 
   CREATE TABLE IF NOT EXISTS brand_profiles (
@@ -148,6 +177,12 @@ async function initPostgres(connectionString: string): Promise<DbClient> {
   // before onchainAgentId was added — patch it in for any database created
   // by an earlier version of this file. Ignored if it's already there.
   await pool.query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS onchainAgentId TEXT").catch(() => {});
+  await pool
+    .query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS reputationTxHash TEXT")
+    .catch(() => {});
+  await pool
+    .query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS reputationWarning TEXT")
+    .catch(() => {});
 
   const client: DbClient = {
     async get(sql, params = []) {
@@ -181,6 +216,16 @@ async function initSqlite(): Promise<DbClient> {
   // so just swallow the "duplicate column name" error if it's already there.
   try {
     db.exec("ALTER TABLE agents ADD COLUMN onchainAgentId TEXT");
+  } catch {
+    // already exists — fine
+  }
+  try {
+    db.exec("ALTER TABLE content_records ADD COLUMN reputationTxHash TEXT");
+  } catch {
+    // already exists — fine
+  }
+  try {
+    db.exec("ALTER TABLE content_records ADD COLUMN reputationWarning TEXT");
   } catch {
     // already exists — fine
   }

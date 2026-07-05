@@ -43,6 +43,41 @@ export const IDENTITY_REGISTRY_ABI = [
   },
 ] as const;
 
+/**
+ * ValidationRegistry — read side only here (the write side, requestValidation
+ * + submitValidationResponse, goes through Circle's Contract Execution API in
+ * src/lib/circle.ts, same as IdentityRegistry.register()). getValidationStatus
+ * is a plain view function so it's cheap to read directly via viem.
+ */
+export const VALIDATION_REGISTRY_ABI = [
+  {
+    inputs: [{ name: "requestHash", type: "bytes32" }],
+    name: "getValidationStatus",
+    outputs: [
+      { name: "validatorAddress", type: "address" },
+      { name: "agentId", type: "uint256" },
+      { name: "response", type: "uint8" },
+      { name: "responseHash", type: "bytes32" },
+      { name: "tag", type: "string" },
+      { name: "lastUpdate", type: "uint256" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+export async function getValidationStatus(requestHash: `0x${string}`) {
+  const client = getArcPublicClient();
+  const contract = getContract({
+    address: ERC8004_CONTRACTS.validationRegistry,
+    abi: VALIDATION_REGISTRY_ABI,
+    client,
+  });
+  const [validatorAddress, agentId, response, responseHash, tag, lastUpdate] =
+    await contract.read.getValidationStatus([requestHash]);
+  return { validatorAddress, agentId, response, responseHash, tag, lastUpdate };
+}
+
 export function getArcPublicClient() {
   return createPublicClient({
     chain: arcTestnet,

@@ -9,7 +9,8 @@
     "lint": "eslint",
     "db:init": "tsx scripts/init-db.ts",
     "register-agent": "tsx scripts/register-agent.ts",
-    "register-seed-agents": "tsx scripts/register-seed-agents.ts"
+    "register-seed-agents": "tsx scripts/register-seed-agents.ts",
+    "validate-agent": "tsx scripts/validate-agent.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

@@ -40,8 +40,15 @@ export interface CreatedWallet {
   demo: boolean;
 }
 
-/** Create a new Arc Testnet developer-controlled wallet for a creator, agent, or the platform treasury. */
-export async function createWallet(label: string): Promise<CreatedWallet> {
+/**
+ * Create a new Arc Testnet developer-controlled wallet for a creator, agent,
+ * or the platform treasury. Never throws — if the real Circle API call
+ * fails for any reason (bad entity secret registration, network hiccup,
+ * wallet-set creation failure, etc.) this falls back to a deterministic
+ * demo wallet instead of letting the error bubble up into a 500 with no
+ * JSON body, which is what was crashing the client's `res.json()` call.
+ */
+export async function createWallet(label: string): Promise<CreatedWallet & { warning?: string }> {
   const client = await getClient();
   if (!client) {
     return {
@@ -52,29 +59,44 @@ export async function createWallet(label: string): Promise<CreatedWallet> {
     };
   }
 
-  let walletSetId = CIRCLE_WALLET_SET_ID;
-  if (!walletSetId) {
-    const walletSet = await client.createWalletSet({ name: "west-creatives" });
-    walletSetId = walletSet.data?.walletSet?.id;
+  try {
+    let walletSetId = CIRCLE_WALLET_SET_ID;
+    if (!walletSetId) {
+      const walletSet = await client.createWalletSet({ name: "west-creatives" });
+      walletSetId = walletSet.data?.walletSet?.id;
+    }
+
+    const res = await client.createWallets({
+      // Cast: @circle-fin/developer-controlled-wallets' published type defs
+      // haven't caught up to Arc's Blockchain literal yet, but the runtime API
+      // accepts "ARC-TESTNET" per Circle's own docs (docs.arc.io tutorials).
+      blockchains: ["ARC-TESTNET"] as never,
+      count: 1,
+      walletSetId: walletSetId!,
+      accountType: "SCA",
+    });
+
+    const wallet = res.data?.wallets?.[0];
+    return {
+      id: wallet?.id ?? randomUUID(),
+      address: wallet?.address ?? fakeAddress(label),
+      blockchain: "ARC-TESTNET",
+      demo: false,
+    };
+  } catch (err) {
+    // Common causes: entity secret ciphertext/registration mismatch, an
+    // expired API key, or a transient network error reaching Circle.
+    return {
+      id: randomUUID(),
+      address: fakeAddress(label + Date.now()),
+      blockchain: "ARC-TESTNET",
+      demo: true,
+      warning:
+        err instanceof Error
+          ? `Real Circle wallet creation failed, using a demo wallet instead: ${err.message}`
+          : "Real Circle wallet creation failed, using a demo wallet instead.",
+    };
   }
-
-  const res = await client.createWallets({
-    // Cast: @circle-fin/developer-controlled-wallets' published type defs
-    // haven't caught up to Arc's Blockchain literal yet, but the runtime API
-    // accepts "ARC-TESTNET" per Circle's own docs (docs.arc.io tutorials).
-    blockchains: ["ARC-TESTNET"] as never,
-    count: 1,
-    walletSetId: walletSetId!,
-    accountType: "SCA",
-  });
-
-  const wallet = res.data?.wallets?.[0];
-  return {
-    id: wallet?.id ?? randomUUID(),
-    address: wallet?.address ?? fakeAddress(label),
-    blockchain: "ARC-TESTNET",
-    demo: false,
-  };
 }
 
 export interface PaymentSplitResult {

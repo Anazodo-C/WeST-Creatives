@@ -9,6 +9,9 @@
   --muted: #9a9ba0;
   --neon: #39ff88;
   --neon-dim: #1f8f4d;
+  /* Flips dark/near-black brand marks (Arc, x402) to near-white so they stay
+     visible with no background chip behind them on this dark theme. */
+  --logo-mono-filter: invert(1) brightness(1.5);
 }
 
 /* Light theme — toggled via a "light" class on <html> (see NavBar). */
@@ -22,6 +25,9 @@ html.light {
   --neon: #17b866;
   --neon-dim: #0e7a45;
   color-scheme: light;
+  /* Those same marks are already dark, which reads fine on this light
+     background — no inversion needed here. */
+  --logo-mono-filter: none;
 }
 
 @theme inline {

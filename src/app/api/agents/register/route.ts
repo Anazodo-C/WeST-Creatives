@@ -30,60 +30,73 @@ export async function POST(req: NextRequest) {
   }
 
   const data = parsed.data;
-  const db = getDb();
 
-  // A creator's personal director agent is a singleton: re-running signup
-  // provisioning for the same developerId (e.g. a wallet reconnecting)
-  // should return their existing personal agent, not mint a duplicate.
-  if (data.visibility === "personal") {
-    const existing = db
-      .prepare(
-        `SELECT id, walletAddress FROM agents WHERE developerId = ? AND visibility = 'personal' LIMIT 1`
-      )
-      .get(data.developerId) as { id: string; walletAddress: string | null } | undefined;
+  // Wrapped so this route always returns valid JSON even on an unexpected
+  // failure (DB error, wallet creation error, etc.) instead of letting an
+  // uncaught throw produce Next's non-JSON error page, which is what broke
+  // the client's res.json() call.
+  try {
+    const db = getDb();
 
-    if (existing) {
-      return NextResponse.json({
-        id: existing.id,
-        walletAddress: existing.walletAddress,
-        demo: undefined,
-        reused: true,
-        note: "Existing personal director agent reused for this owner.",
-      });
+    // A creator's personal director agent is a singleton: re-running signup
+    // provisioning for the same developerId (e.g. a wallet reconnecting)
+    // should return their existing personal agent, not mint a duplicate.
+    if (data.visibility === "personal") {
+      const existing = db
+        .prepare(
+          `SELECT id, walletAddress FROM agents WHERE developerId = ? AND visibility = 'personal' LIMIT 1`
+        )
+        .get(data.developerId) as { id: string; walletAddress: string | null } | undefined;
+
+      if (existing) {
+        return NextResponse.json({
+          id: existing.id,
+          walletAddress: existing.walletAddress,
+          demo: undefined,
+          reused: true,
+          note: "Existing personal director agent reused for this owner.",
+        });
+      }
     }
+
+    const id = randomUUID();
+    const wallet = await createWallet(`agent-${data.name}`);
+
+    db.prepare(
+      `INSERT INTO agents (id, name, developerId, description, type, capabilities, model, nicheSocialMedia, nicheIndustry, modality, scope, generationParadigm, rank, score, transactionCount, priceUsdc, walletAddress, visibility, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 50, 0, ?, ?, ?, ?)`
+    ).run(
+      id,
+      data.name,
+      data.developerId,
+      data.description,
+      data.type,
+      JSON.stringify(data.capabilities),
+      data.model,
+      data.nicheSocialMedia ?? null,
+      data.nicheIndustry ?? null,
+      data.modality,
+      data.scope,
+      data.generationParadigm,
+      data.priceUsdc,
+      wallet.address,
+      data.visibility,
+      new Date().toISOString()
+    );
+
+    return NextResponse.json({
+      id,
+      walletAddress: wallet.address,
+      demo: wallet.demo,
+      warning: wallet.warning,
+      // Real onchain identity registration (ERC-8004) happens via
+      // `npm run register-agent -- --agentId=<id>` — see scripts/register-agent.ts
+      note: "Agent stored locally. Run `npm run register-agent` to anchor its identity on Arc Testnet.",
+    });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Failed to register agent." },
+      { status: 500 }
+    );
   }
-
-  const id = randomUUID();
-  const wallet = await createWallet(`agent-${data.name}`);
-
-  db.prepare(
-    `INSERT INTO agents (id, name, developerId, description, type, capabilities, model, nicheSocialMedia, nicheIndustry, modality, scope, generationParadigm, rank, score, transactionCount, priceUsdc, walletAddress, visibility, createdAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 50, 0, ?, ?, ?, ?)`
-  ).run(
-    id,
-    data.name,
-    data.developerId,
-    data.description,
-    data.type,
-    JSON.stringify(data.capabilities),
-    data.model,
-    data.nicheSocialMedia ?? null,
-    data.nicheIndustry ?? null,
-    data.modality,
-    data.scope,
-    data.generationParadigm,
-    data.priceUsdc,
-    wallet.address,
-    data.visibility,
-    new Date().toISOString()
-  );
-
-  return NextResponse.json({
-    id,
-    walletAddress: wallet.address,
-    demo: wallet.demo,
-    // Real onchain identity registration (ERC-8004) happens via
-    // `npm run register-agent -- --agentId=<id>` — see scripts/register-agent.ts
-    note: "Agent stored locally. Run `npm run register-agent` to anchor its identity on Arc Testnet.",
-  });
 }

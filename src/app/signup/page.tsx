@@ -7,6 +7,31 @@ import { useAccount } from "wagmi";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { Wallet, Chrome, Loader2 } from "lucide-react";
 
+/**
+ * Parse a fetch Response as JSON, raising a clear Error instead of the raw
+ * "Unexpected end of JSON input" browser message when the body is empty or
+ * not JSON (e.g. a non-API-route 500 page, or a network hiccup) — this is
+ * also defense-in-depth now that both API routes below always return JSON
+ * even on their own internal errors.
+ */
+async function parseJson(res: Response, label: string) {
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    throw new Error(`${label} returned an unreadable response (status ${res.status}).`);
+  }
+  if (!res.ok) {
+    const message =
+      data && typeof data === "object" && "error" in data
+        ? String((data as { error: unknown }).error)
+        : `${label} failed (status ${res.status}).`;
+    throw new Error(message);
+  }
+  return data as Record<string, unknown>;
+}
+
 async function provisionAccount(params: {
   ownerId: string;
   role: "creator" | "developer";
@@ -18,14 +43,14 @@ async function provisionAccount(params: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ownerId: params.ownerId, label: `${params.role}-${params.name}` }),
   });
-  const wallet = await walletRes.json();
+  const wallet = await parseJson(walletRes, "Wallet creation");
 
   let agentName: string | undefined;
   if (params.role === "creator") {
     // Every creator gets a personal director agent, but it's marked
     // "personal" so it never shows up in the public /agents marketplace —
     // the only director agent listed there is the shared guest/demo one.
-    await fetch("/api/agents/register", {
+    const agentRes = await fetch("/api/agents/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -43,6 +68,7 @@ async function provisionAccount(params: {
         visibility: "personal",
       }),
     });
+    await parseJson(agentRes, "Agent registration");
     agentName = `${params.name}'s Agent`;
   }
 
@@ -67,6 +93,7 @@ function SignupForm() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [walletLoading, setWalletLoading] = useState(false);
   const [result, setResult] = useState<{ address: string; agentName?: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   // Once Google sign-in completes, provision this identity automatically
   // (skip if we've already done it for this exact email in this browser).
@@ -79,6 +106,7 @@ function SignupForm() {
     }
 
     setGoogleLoading(true);
+    setError(null);
     provisionAccount({
       ownerId,
       role,
@@ -89,6 +117,7 @@ function SignupForm() {
         setResult(r);
         setTimeout(() => router.push("/dashboard"), 1200);
       })
+      .catch((err) => setError(err instanceof Error ? err.message : "Something went wrong."))
       .finally(() => setGoogleLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, session?.user?.email]);
@@ -112,6 +141,7 @@ function SignupForm() {
     e.preventDefault();
     setLoading(true);
     setWalletLoading(isConnected);
+    setError(null);
     try {
       const ownerId =
         isConnected && address
@@ -120,6 +150,8 @@ function SignupForm() {
       const r = await provisionAccount({ ownerId, role, name, industry });
       setResult(r);
       setTimeout(() => router.push("/dashboard"), 1200);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setLoading(false);
       setWalletLoading(false);
@@ -219,6 +251,12 @@ function SignupForm() {
           {loading || walletLoading ? "Setting up..." : "Create account"}
         </button>
       </form>
+
+      {error && (
+        <div className="mt-6 rounded-xl border border-red-500/40 bg-red-500/5 p-4 text-sm text-red-400">
+          {error}
+        </div>
+      )}
 
       {result && (
         <div className="mt-6 rounded-xl border border-neon-dim bg-neon/5 p-4 text-sm">

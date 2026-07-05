@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CircleMark, ArcMark, X402Mark, UsdcMark } from "@/components/TechLogos";
 
 export default function Footer() {
   return (
@@ -6,8 +7,9 @@ export default function Footer() {
       <div className="mx-auto max-w-7xl px-6 py-12">
         <div className="grid grid-cols-2 gap-8 md:grid-cols-5">
           <div className="col-span-2">
-            <div className="text-lg font-extrabold">
-              VIBE<span className="text-neon">.</span>
+            <div className="text-lg tracking-tight">
+              <span className="font-extrabold text-white">WeST</span>
+              <span className="font-brand-cursive text-2xl font-normal text-neon"> Creatives</span>
             </div>
             <p className="mt-3 max-w-xs text-sm text-muted">
               Marketplace for vibe creators. Agents that make and receive
@@ -37,17 +39,25 @@ export default function Footer() {
           <div>
             <div className="text-sm font-semibold text-foreground">Built on</div>
             <ul className="mt-3 space-y-2 text-sm text-muted">
-              <li>Circle</li>
-              <li>Arc</li>
-              <li>x402</li>
-              <li>USDC</li>
+              <li className="flex items-center gap-2">
+                <CircleMark className="h-4 w-4" /> Circle
+              </li>
+              <li className="flex items-center gap-2">
+                <ArcMark className="h-4 w-4" /> Arc
+              </li>
+              <li className="flex items-center gap-2">
+                <X402Mark className="h-4 w-4" /> x402
+              </li>
+              <li className="flex items-center gap-2">
+                <UsdcMark className="h-4 w-4" /> USDC
+              </li>
             </ul>
           </div>
         </div>
 
         <div className="mt-10 flex flex-col items-start justify-between gap-4 border-t border-border-subtle pt-6 text-xs text-muted md:flex-row md:items-center">
           <span>For: Canteen x Lepton Hackathon</span>
-          <span>&copy; {new Date().getFullYear()} Vibe Marketplace</span>
+          <span>&copy; {new Date().getFullYear()} West Creatives</span>
         </div>
       </div>
     </footer>

@@ -54,7 +54,7 @@ export async function createWallet(label: string): Promise<CreatedWallet> {
 
   let walletSetId = CIRCLE_WALLET_SET_ID;
   if (!walletSetId) {
-    const walletSet = await client.createWalletSet({ name: "vibe-marketplace" });
+    const walletSet = await client.createWalletSet({ name: "west-creatives" });
     walletSetId = walletSet.data?.walletSet?.id;
   }
 
@@ -81,15 +81,19 @@ export interface PaymentSplitResult {
   developerTxHash?: string;
   platformTxHash?: string;
   demo: boolean;
+  warning?: string;
 }
 
 /**
  * Settle the 90/10 developer/platform split for a single content-generation
- * request via Circle Gateway nanopayments (x402). In demo mode this just
- * records the intent without moving funds.
+ * request via Circle Gateway nanopayments (x402). In demo mode, or if
+ * `fromWalletId` isn't a real Circle wallet id (e.g. a guest trial session
+ * with no wallet), this records the intent without moving funds instead of
+ * throwing — a content request should never 500 just because settlement
+ * couldn't run.
  */
 export async function settlePaymentSplit(params: {
-  fromWalletId: string;
+  fromWalletId: string | null;
   developerWalletAddress: string;
   platformWalletAddress: string;
   totalUsdc: number;
@@ -98,34 +102,43 @@ export async function settlePaymentSplit(params: {
   const platformShare = +(params.totalUsdc * 0.1).toFixed(6);
 
   const client = await getClient();
-  if (!client) {
+  if (!client || !params.fromWalletId) {
     return { demo: true };
   }
 
-  // Real implementation: use Circle Gateway nanopayments (x402) to move
-  // `developerShare` to developerWalletAddress and `platformShare` to
-  // platformWalletAddress, gaslessly, sub-cent precision. See:
-  // https://developers.circle.com/gateway/nanopayments
-  const [dev, plat] = await Promise.all([
-    client.createTransaction({
-      walletId: params.fromWalletId,
-      tokenId: process.env.ARC_USDC_TOKEN_ID,
-      destinationAddress: params.developerWalletAddress,
-      amount: [developerShare.toString()],
-      fee: { type: "level", config: { feeLevel: "MEDIUM" } },
-    } as never),
-    client.createTransaction({
-      walletId: params.fromWalletId,
-      tokenId: process.env.ARC_USDC_TOKEN_ID,
-      destinationAddress: params.platformWalletAddress,
-      amount: [platformShare.toString()],
-      fee: { type: "level", config: { feeLevel: "MEDIUM" } },
-    } as never),
-  ]);
+  try {
+    // Real implementation: use Circle Gateway nanopayments (x402) to move
+    // `developerShare` to developerWalletAddress and `platformShare` to
+    // platformWalletAddress, gaslessly, sub-cent precision. See:
+    // https://developers.circle.com/gateway/nanopayments
+    const [dev, plat] = await Promise.all([
+      client.createTransaction({
+        walletId: params.fromWalletId,
+        tokenId: process.env.ARC_USDC_TOKEN_ID,
+        destinationAddress: params.developerWalletAddress,
+        amount: [developerShare.toString()],
+        fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+      } as never),
+      client.createTransaction({
+        walletId: params.fromWalletId,
+        tokenId: process.env.ARC_USDC_TOKEN_ID,
+        destinationAddress: params.platformWalletAddress,
+        amount: [platformShare.toString()],
+        fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+      } as never),
+    ]);
 
-  return {
-    developerTxHash: (dev as { data?: { id?: string } })?.data?.id,
-    platformTxHash: (plat as { data?: { id?: string } })?.data?.id,
-    demo: false,
-  };
+    return {
+      developerTxHash: (dev as { data?: { id?: string } })?.data?.id,
+      platformTxHash: (plat as { data?: { id?: string } })?.data?.id,
+      demo: false,
+    };
+  } catch (err) {
+    // Common causes on testnet: empty USDC balance, wrong token id, or a
+    // walletId that was never a real Circle wallet (e.g. guest sessions).
+    return {
+      demo: true,
+      warning: err instanceof Error ? err.message : "Settlement failed, recorded as unsettled.",
+    };
+  }
 }

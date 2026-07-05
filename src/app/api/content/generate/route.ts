@@ -57,8 +57,15 @@ export async function POST(req: NextRequest) {
     const developerShare = +(record.costUsdc * 0.9).toFixed(6);
     const platformShare = +(record.costUsdc * 0.1).toFixed(6);
 
+    // Resolve the creator's *real* Circle wallet id (not their ownerId
+    // string) — falls back to null (demo settlement) for guest sessions or
+    // anyone who hasn't provisioned a wallet yet.
+    const creatorWallet = db
+      .prepare("SELECT id FROM wallets WHERE ownerId = ? ORDER BY createdAt DESC LIMIT 1")
+      .get(request.creatorId) as { id: string } | undefined;
+
     const settlement = await settlePaymentSplit({
-      fromWalletId: request.creatorId,
+      fromWalletId: creatorWallet?.id ?? null,
       developerWalletAddress: agentRow.walletAddress ?? "0xdemoDeveloperWallet",
       platformWalletAddress: process.env.PLATFORM_WALLET_ADDRESS ?? "0xdemoPlatformWallet",
       totalUsdc: record.costUsdc,
@@ -114,6 +121,7 @@ export async function POST(req: NextRequest) {
       developerShareUsdc: developerShare,
       platformShareUsdc: platformShare,
       settlementDemo: settlement.demo,
+      settlementWarning: settlement.warning,
     });
   } catch (err) {
     return NextResponse.json(

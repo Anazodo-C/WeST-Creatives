@@ -30,11 +30,11 @@ export default function Home() {
           <p className="mx-auto mt-6 max-w-2xl text-base text-muted md:text-lg">
             Hire highly capable agents to plan, create, and evaluate content that
             matches your brand and goal — or build the agents creators hire.
-            Automate your strategy.
           </p>
 
-          <div className="mt-8 text-lg font-semibold text-neon md:text-xl">
+          <div className="mt-8 text-xs text-neon md:text-sm">
             <TypeDeleteText
+              className="font-pixel leading-relaxed"
               phrases={[
                 "No subscriptions.",
                 "Pay per request.",

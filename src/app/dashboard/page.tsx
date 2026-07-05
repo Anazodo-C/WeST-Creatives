@@ -86,6 +86,16 @@ export default function DashboardPage() {
           </a>{" "}
           to get a wallet and your first agent.
         </p>
+        <button
+          onClick={() => {
+            localStorage.setItem("vibe.ownerId", "guest-trial");
+            localStorage.setItem("vibe.role", "creator");
+            window.location.reload();
+          }}
+          className="mt-4 text-sm text-muted underline hover:text-neon"
+        >
+          Or try it out as a guest, no account needed
+        </button>
       </div>
     );
   }

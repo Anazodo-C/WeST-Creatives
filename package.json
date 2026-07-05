@@ -13,8 +13,12 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
     "@circle-fin/developer-controlled-wallets": "^7.0.1",
+    "@fontsource/dancing-script": "^5.2.5",
     "@fontsource/montserrat": "^5.2.8",
+    "@fontsource/press-start-2p": "^5.2.5",
     "@google/generative-ai": "^0.21.0",
+    "@rainbow-me/rainbowkit": "^2.2.3",
+    "@tanstack/react-query": "^5.62.11",
     "clsx": "^2.1.1",
     "framer-motion": "^11.15.0",
     "lucide-react": "^0.469.0",
@@ -23,8 +27,10 @@
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "recharts": "^2.15.0",
+    "resend": "^4.0.1",
     "uuid": "^11.0.5",
     "viem": "^2.21.58",
+    "wagmi": "^2.14.6",
     "zod": "^3.24.1"
   },
   "devDependencies": {

@@ -17,6 +17,9 @@ const bodySchema = z.object({
   scope: z.enum(["general", "specialized"]).default("specialized"),
   generationParadigm: z.enum(["auto-regressive", "diffusion"]).default("auto-regressive"),
   priceUsdc: z.number().positive(),
+  // 'personal' = a creator's own director agent — never shown in the public
+  // /agents marketplace. Defaults to 'public' for real marketplace agents.
+  visibility: z.enum(["public", "personal"]).default("public"),
 });
 
 export async function POST(req: NextRequest) {
@@ -32,8 +35,8 @@ export async function POST(req: NextRequest) {
   const wallet = await createWallet(`agent-${data.name}`);
 
   db.prepare(
-    `INSERT INTO agents (id, name, developerId, description, type, capabilities, model, nicheSocialMedia, nicheIndustry, modality, scope, generationParadigm, rank, score, transactionCount, priceUsdc, walletAddress, createdAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 50, 0, ?, ?, ?)`
+    `INSERT INTO agents (id, name, developerId, description, type, capabilities, model, nicheSocialMedia, nicheIndustry, modality, scope, generationParadigm, rank, score, transactionCount, priceUsdc, walletAddress, visibility, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 50, 0, ?, ?, ?, ?)`
   ).run(
     id,
     data.name,
@@ -49,6 +52,7 @@ export async function POST(req: NextRequest) {
     data.generationParadigm,
     data.priceUsdc,
     wallet.address,
+    data.visibility,
     new Date().toISOString()
   );
 

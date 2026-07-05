@@ -11,6 +11,19 @@
   --neon-dim: #1f8f4d;
 }
 
+/* Light theme — toggled via a "light" class on <html> (see NavBar). */
+html.light {
+  --background: #f7f8f7;
+  --surface: #ffffff;
+  --surface-2: #eef0ee;
+  --border-subtle: #dcdfdc;
+  --foreground: #0c0d0e;
+  --muted: #5b5e5b;
+  --neon: #17b866;
+  --neon-dim: #0e7a45;
+  color-scheme: light;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-surface: var(--surface);
@@ -22,16 +35,28 @@
   --color-neon-dim: var(--neon-dim);
   --font-sans: "Montserrat", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Montserrat", ui-sans-serif, system-ui, sans-serif;
+  --font-pixel: "Press Start 2P", ui-monospace, monospace;
+  --font-cursive: "Dancing Script", cursive;
 }
 
 html {
   color-scheme: dark;
+  transition: background 0.2s ease, color 0.2s ease;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: "Montserrat", ui-sans-serif, system-ui, sans-serif;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.font-pixel {
+  font-family: "Press Start 2P", ui-monospace, monospace;
+}
+
+.font-brand-cursive {
+  font-family: "Dancing Script", cursive;
 }
 
 ::selection {

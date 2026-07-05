@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession, signIn } from "next-auth/react";
+import { useAccount } from "wagmi";
+import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { Wallet, Chrome, Loader2 } from "lucide-react";
 
 async function provisionAccount(params: {
@@ -20,6 +22,9 @@ async function provisionAccount(params: {
 
   let agentName: string | undefined;
   if (params.role === "creator") {
+    // Every creator gets a personal director agent, but it's marked
+    // "personal" so it never shows up in the public /agents marketplace —
+    // the only director agent listed there is the shared guest/demo one.
     await fetch("/api/agents/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -35,6 +40,7 @@ async function provisionAccount(params: {
         scope: "general",
         generationParadigm: "auto-regressive",
         priceUsdc: 0.01,
+        visibility: "personal",
       }),
     });
     agentName = `${params.name}'s Agent`;
@@ -50,6 +56,8 @@ function SignupForm() {
   const router = useRouter();
   const params = useSearchParams();
   const { data: session, status } = useSession();
+  const { address, isConnected } = useAccount();
+  const { openConnectModal } = useConnectModal();
   const initialRole = params.get("role") === "developer" ? "developer" : "creator";
 
   const [role, setRole] = useState<"creator" | "developer">(initialRole);
@@ -57,6 +65,7 @@ function SignupForm() {
   const [industry, setIndustry] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [walletLoading, setWalletLoading] = useState(false);
   const [result, setResult] = useState<{ address: string; agentName?: string } | null>(null);
 
   // Once Google sign-in completes, provision this identity automatically
@@ -84,6 +93,30 @@ function SignupForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, session?.user?.email]);
 
+  // Same auto-provision flow once a wallet connects via RainbowKit.
+  useEffect(() => {
+    if (!isConnected || !address) return;
+    const ownerId = `wallet-${address}`;
+    if (localStorage.getItem("vibe.ownerId") === ownerId) {
+      router.push("/dashboard");
+      return;
+    }
+
+    setWalletLoading(true);
+    provisionAccount({
+      ownerId,
+      role,
+      name: name || `${address.slice(0, 6)}...${address.slice(-4)}`,
+      industry,
+    })
+      .then((r) => {
+        setResult(r);
+        setTimeout(() => router.push("/dashboard"), 1200);
+      })
+      .finally(() => setWalletLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, address]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -97,7 +130,7 @@ function SignupForm() {
     }
   }
 
-  const busy = loading || googleLoading;
+  const busy = loading || googleLoading || walletLoading;
 
   return (
     <div className="mx-auto max-w-lg px-6 py-20">
@@ -154,10 +187,12 @@ function SignupForm() {
         <div className="flex gap-3">
           <button
             type="button"
-            className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-border-subtle bg-surface py-2.5 text-sm hover:border-neon-dim"
-            title="Real wallet-connect (e.g. RainbowKit) is a fast-follow — not wired yet"
+            disabled={busy}
+            onClick={() => openConnectModal?.()}
+            className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-border-subtle bg-surface py-2.5 text-sm hover:border-neon-dim disabled:opacity-50"
           >
-            <Wallet size={16} /> Connect wallet
+            {walletLoading ? <Loader2 size={16} className="animate-spin" /> : <Wallet size={16} />}
+            Connect wallet
           </button>
           <button
             type="button"

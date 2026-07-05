@@ -31,6 +31,21 @@ export function getDb(): DatabaseSync {
       transactionCount INTEGER DEFAULT 0,
       priceUsdc REAL DEFAULT 0,
       walletAddress TEXT,
+      -- 'public' = listed in the /agents marketplace. 'personal' = a
+      -- creator's own director agent, never listed publicly.
+      visibility TEXT DEFAULT 'public',
+      -- Reserved for the agent-to-agent + social posting feature (agents get
+      -- their own X page where completed work is posted) — schema is ready,
+      -- posting automation is not yet wired (see README roadmap note).
+      xHandle TEXT,
+      createdAt TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS contact_messages (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      message TEXT NOT NULL,
+      delivered INTEGER DEFAULT 0,
       createdAt TEXT NOT NULL
     );
 

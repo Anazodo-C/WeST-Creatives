@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
+import { useAccount } from "wagmi";
 import { ExternalLink, Wallet, Sparkles, Loader2 } from "lucide-react";
 import type { ContentRecord } from "@/lib/types";
 
 export default function DashboardPage() {
   const { data: session } = useSession();
+  const { status: walletStatus } = useAccount();
   const [ownerId, setOwnerId] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
   const [walletAddress, setWalletAddress] = useState<string>("");
@@ -45,6 +47,23 @@ export default function DashboardPage() {
         .then((d) => setHistory(d.records ?? []));
     }
   }, [session?.user?.email]);
+
+  // If this session's identity came from a wallet and that wallet is later
+  // disconnected, drop it from local storage/state so the dashboard reflects
+  // a signed-out account instead of continuing to show stale wallet info.
+  // Gated on the confirmed "disconnected" status (not "connecting" /
+  // "reconnecting") so a page refresh mid-reconnect doesn't wrongly clear it.
+  useEffect(() => {
+    if (walletStatus !== "disconnected") return;
+    const oid = localStorage.getItem("vibe.ownerId");
+    if (oid && oid.startsWith("wallet-")) {
+      localStorage.removeItem("vibe.ownerId");
+      localStorage.removeItem("vibe.role");
+      setOwnerId(null);
+      setRole(null);
+      setHistory([]);
+    }
+  }, [walletStatus]);
 
   async function handleGenerate(e: React.FormEvent) {
     e.preventDefault();

@@ -31,6 +31,28 @@ export async function POST(req: NextRequest) {
 
   const data = parsed.data;
   const db = getDb();
+
+  // A creator's personal director agent is a singleton: re-running signup
+  // provisioning for the same developerId (e.g. a wallet reconnecting)
+  // should return their existing personal agent, not mint a duplicate.
+  if (data.visibility === "personal") {
+    const existing = db
+      .prepare(
+        `SELECT id, walletAddress FROM agents WHERE developerId = ? AND visibility = 'personal' LIMIT 1`
+      )
+      .get(data.developerId) as { id: string; walletAddress: string | null } | undefined;
+
+    if (existing) {
+      return NextResponse.json({
+        id: existing.id,
+        walletAddress: existing.walletAddress,
+        demo: undefined,
+        reused: true,
+        note: "Existing personal director agent reused for this owner.",
+      });
+    }
+  }
+
   const id = randomUUID();
   const wallet = await createWallet(`agent-${data.name}`);
 

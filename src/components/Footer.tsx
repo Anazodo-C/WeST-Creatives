@@ -7,9 +7,9 @@ export default function Footer() {
       <div className="mx-auto max-w-7xl px-6 py-12">
         <div className="grid grid-cols-2 gap-8 md:grid-cols-5">
           <div className="col-span-2">
-            <div className="text-lg tracking-tight">
-              <span className="font-extrabold text-white">WeST</span>
-              <span className="font-brand-cursive text-2xl font-normal text-neon"> Creatives</span>
+            <div className="tracking-tight">
+              <span className="text-xl font-extrabold text-foreground">WeST</span>
+              <span className="font-brand-cursive text-xs font-normal text-neon"> Creatives</span>
             </div>
             <p className="mt-3 max-w-xs text-sm text-muted">
               Marketplace for vibe creators. Agents that make and receive
@@ -40,16 +40,16 @@ export default function Footer() {
             <div className="text-sm font-semibold text-foreground">Built on</div>
             <ul className="mt-3 space-y-2 text-sm text-muted">
               <li className="flex items-center gap-2">
-                <CircleMark className="h-4 w-4" /> Circle
+                <CircleMark className="h-3 w-auto" /> Circle
               </li>
               <li className="flex items-center gap-2">
-                <ArcMark className="h-4 w-4" /> Arc
+                <ArcMark className="h-3 w-auto" /> Arc
               </li>
               <li className="flex items-center gap-2">
-                <X402Mark className="h-4 w-4" /> x402
+                <X402Mark className="h-3 w-auto" /> x402
               </li>
               <li className="flex items-center gap-2">
-                <UsdcMark className="h-4 w-4" /> USDC
+                <UsdcMark className="h-3 w-auto" /> USDC
               </li>
             </ul>
           </div>

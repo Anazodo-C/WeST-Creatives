@@ -30,9 +30,9 @@ export default function NavBar() {
   return (
     <header className="sticky top-0 z-50 border-b border-border-subtle bg-background/80 backdrop-blur">
       <div className="mx-auto grid max-w-7xl grid-cols-[1fr_auto_1fr] items-center gap-6 px-6 py-4">
-        <Link href="/" className="justify-self-start text-lg tracking-tight">
-          <span className="font-extrabold text-white">WeST</span>
-          <span className="font-brand-cursive text-2xl font-normal text-neon"> Creatives</span>
+        <Link href="/" className="justify-self-start tracking-tight">
+          <span className="text-xl font-extrabold text-foreground">WeST</span>
+          <span className="font-brand-cursive text-xs font-normal text-neon"> Creatives</span>
         </Link>
 
         <nav className="hidden items-center justify-center gap-8 text-sm font-medium text-muted md:flex">

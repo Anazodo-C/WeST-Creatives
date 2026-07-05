@@ -46,7 +46,17 @@ The SQLite file is created automatically at `.data/vibe.db` on first request.
 | Google API key (Imagen + Veo) | aistudio.google.com |
 | ElevenLabs key | elevenlabs.io |
 | Resend key (contact form email) | resend.com |
-| WalletConnect project id (optional) | cloud.walletconnect.com |
+| WalletConnect project id (optional) | cloud.reown.com |
+
+**"Origin http://localhost:3000 not found on Allowlist"** — this comes from
+`cloud.reown.com` (the WalletConnect Cloud dashboard, rebranded to Reown).
+It means the app is running with either no project id, or a placeholder one
+(`web3.ts` falls back to a dummy id so wallet connect still renders without
+one). Injected wallets like MetaMask still work fine through this warning —
+but to make it go away and unlock WalletConnect's QR/mobile flow: create a
+free project at cloud.reown.com, then in that project's settings add both
+`http://localhost:3000` and your deployed domain under **Allowed Origins**,
+and put the project id in `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` in `.env`.
 
 **Never commit `.env`.** It's already gitignored.
 

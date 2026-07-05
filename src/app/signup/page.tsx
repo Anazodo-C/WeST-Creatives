@@ -93,40 +93,36 @@ function SignupForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, session?.user?.email]);
 
-  // Same auto-provision flow once a wallet connects via RainbowKit.
+  // Connecting a wallet only auto-redirects a *returning* owner (already
+  // provisioned on this browser, same address) straight to their dashboard.
+  // For a new wallet, we deliberately do NOT auto-provision here anymore —
+  // that used to fire immediately on connect with a placeholder name before
+  // the person ever got a chance to type one in. Now connecting just
+  // confirms the address; the account (with their chosen name/role) is
+  // created when they submit the form below.
   useEffect(() => {
     if (!isConnected || !address) return;
     const ownerId = `wallet-${address}`;
     if (localStorage.getItem("vibe.ownerId") === ownerId) {
       router.push("/dashboard");
-      return;
     }
-
-    setWalletLoading(true);
-    provisionAccount({
-      ownerId,
-      role,
-      name: name || `${address.slice(0, 6)}...${address.slice(-4)}`,
-      industry,
-    })
-      .then((r) => {
-        setResult(r);
-        setTimeout(() => router.push("/dashboard"), 1200);
-      })
-      .finally(() => setWalletLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, address]);
+  }, [isConnected, address, router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
+    setWalletLoading(isConnected);
     try {
-      const ownerId = `${role}-${name.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`;
+      const ownerId =
+        isConnected && address
+          ? `wallet-${address}`
+          : `${role}-${name.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`;
       const r = await provisionAccount({ ownerId, role, name, industry });
       setResult(r);
       setTimeout(() => router.push("/dashboard"), 1200);
     } finally {
       setLoading(false);
+      setWalletLoading(false);
     }
   }
 
@@ -187,12 +183,14 @@ function SignupForm() {
         <div className="flex gap-3">
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || isConnected}
             onClick={() => openConnectModal?.()}
             className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-border-subtle bg-surface py-2.5 text-sm hover:border-neon-dim disabled:opacity-50"
           >
-            {walletLoading ? <Loader2 size={16} className="animate-spin" /> : <Wallet size={16} />}
-            Connect wallet
+            <Wallet size={16} className={isConnected ? "text-neon" : undefined} />
+            {isConnected && address
+              ? `${address.slice(0, 6)}...${address.slice(-4)}`
+              : "Connect wallet"}
           </button>
           <button
             type="button"
@@ -205,13 +203,20 @@ function SignupForm() {
           </button>
         </div>
 
+        {isConnected && (
+          <p className="text-xs text-muted">
+            Wallet connected — name your {role === "creator" ? "agent" : "developer profile"} above,
+            then create your account below.
+          </p>
+        )}
+
         <button
           type="submit"
           disabled={busy || !name}
           className="flex w-full items-center justify-center gap-2 rounded-xl bg-neon py-3 font-semibold text-black disabled:opacity-50"
         >
-          {loading && <Loader2 size={16} className="animate-spin" />}
-          {loading ? "Setting up..." : "Create account"}
+          {(loading || walletLoading) && <Loader2 size={16} className="animate-spin" />}
+          {loading || walletLoading ? "Setting up..." : "Create account"}
         </button>
       </form>
 

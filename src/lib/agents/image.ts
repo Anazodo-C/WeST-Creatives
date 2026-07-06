@@ -1,16 +1,26 @@
 /**
  * Image agent workflow: brand analysis -> design concept -> idea image -> evaluate.
- * Provider: Google's Nano Banana 2 Lite (model slug
- * "google/gemini-3.1-flash-lite-image") via OpenRouter's OpenAI-compatible
- * chat completions API — a plain fetch() call, no SDK needed. Falls back to
- * a placeholder data-URI description when OPENROUTER_API_KEY is unset.
+ * Provider: OpenRouter's OpenAI-compatible chat completions API — a plain
+ * fetch() call, no SDK needed. Falls back to a placeholder data-URI
+ * description when OPENROUTER_API_KEY is unset.
+ *
+ * Default model is black-forest-labs/flux.2-klein-4b: billed a flat rate per
+ * output *megapixel* (~$0.014-0.03/image), not per token. That matters
+ * because per-token Gemini/GPT-image models on OpenRouter (e.g. the
+ * previously-used google/gemini-3.1-flash-lite-image) run an affordability
+ * preflight against the model's *maximum possible* output_tokens (~65,536)
+ * whenever max_tokens isn't capped — so a real, positive credit balance can
+ * still get rejected with "This request requires more credits" even though
+ * one image only needs a few thousand tokens. A flat per-image price has no
+ * such preflight to trip. max_tokens is capped below regardless, so
+ * switching OPENROUTER_IMAGE_MODEL back to a per-token model still works
+ * without hitting that trap.
  *
  * Went through two other providers first, both dead ends:
  *  - Google's Gemini API called directly (gemini-2.5-flash-image via
  *    @google/genai): that model's free tier is a hard 0 requests/day — every
  *    call fails with RESOURCE_EXHAUSTED unless the Google Cloud project
- *    behind the key has its own billing account attached, and a *new* key
- *    from the same unbilled project hits the identical wall.
+ *    behind the key has its own billing account attached.
  *  - fal.ai (FLUX.1 dev): worked, but the account got locked for exhausted
  *    balance ("User is locked. Reason: Exhausted balance.").
  * OpenRouter sidesteps the Google billing-account problem specifically
@@ -22,7 +32,7 @@
 import type { BrandProfile } from "@/lib/types";
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const OPENROUTER_IMAGE_MODEL = process.env.OPENROUTER_IMAGE_MODEL || "google/gemini-3.1-flash-lite-image";
+const OPENROUTER_IMAGE_MODEL = process.env.OPENROUTER_IMAGE_MODEL || "black-forest-labs/flux.2-klein-4b";
 
 interface ImagePromptAttributes {
   subject: string;
@@ -91,6 +101,12 @@ export async function generateImage(
         // Required — without this the model responds as plain chat text
         // with no image at all, same trap as calling Gemini directly.
         modalities: ["image", "text"],
+        // Caps OpenRouter's pre-request affordability check to a realistic
+        // ceiling for one image + a short caption instead of the model's
+        // full max output (~65,536 tokens for some Gemini variants) — that
+        // uncapped default is what caused "requires more credits" errors on
+        // a real, positive-but-modest balance.
+        max_tokens: 4096,
       }),
     });
 

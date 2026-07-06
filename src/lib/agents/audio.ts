@@ -8,9 +8,17 @@ import type { BrandProfile } from "@/lib/types";
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID ?? "21m00Tcm4TlvDq8ikWAM";
 
+/**
+ * `preferredModelId` lets the director pass the specific audio sub-agent's
+ * own ElevenLabs model (e.g. Echo Voice's eleven_multilingual_v2 vs Turbo
+ * Teller's eleven_turbo_v2_5 vs Flash Bark's eleven_flash_v2_5) instead of
+ * always using the same hardcoded model — see
+ * src/lib/agents/director.ts's scoutAgents/runMultiDirector.
+ */
 export async function generateAudio(
   enhancedPrompt: string,
-  brand?: Partial<BrandProfile>
+  brand?: Partial<BrandProfile>,
+  preferredModelId: string = "eleven_multilingual_v2"
 ): Promise<{ url: string; script: string; demo: boolean }> {
   const script = `[voice: ${
     brand?.voiceProfile ?? "neutral, confident"
@@ -31,7 +39,7 @@ export async function generateAudio(
         },
         body: JSON.stringify({
           text: script,
-          model_id: "eleven_multilingual_v2",
+          model_id: preferredModelId,
         }),
       }
     );

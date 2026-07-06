@@ -11,6 +11,36 @@ type OutputKind = "image" | "audio" | "video" | "text";
 
 const ALL_MODALITIES: ContentModality[] = ["text", "image", "video", "audio"];
 
+interface BudgetRangeEntry {
+  modality: ContentModality;
+  cheapest: number;
+  priciest: number;
+  agentCount: number;
+}
+
+interface BudgetRange {
+  min: number;
+  max: number;
+  perModality: BudgetRangeEntry[];
+}
+
+/** The director's autonomous hiring decision for the most recent submission
+ * — which agent it scouted and hired per modality, and how many
+ * agent-combinations it evaluated to get there. Surfaced so the "director
+ * scouts the marketplace and picks the best it can afford" behavior is
+ * actually visible, not just its output. */
+interface ScoutSummary {
+  combinationsEvaluated: number;
+  selections: {
+    modality: ContentModality;
+    agentId: string;
+    agentName: string;
+    model: string;
+    priceUsdc: number;
+    score: number;
+  }[];
+}
+
 /** Sniff a data: URI's media type so output can be previewed/downloaded correctly.
  * Matches any encoding token (";base64,", ";utf8,", etc.) — the demo image
  * placeholder in particular is a URL-encoded SVG ("data:image/svg+xml;utf8,..."),
@@ -111,6 +141,16 @@ export default function DashboardPage() {
   // fully editable, this is just a sane starting point so the very first
   // submit doesn't fail with "Budget too low" for no obvious reason.
   const [budget, setBudget] = useState(AGENT_PRICE_USDC.text);
+  // Real recommended range from the marketplace's actual registered agents
+  // (see /api/content/budget-recommendation + scoutAgents in
+  // src/lib/agents/scout.ts) — replaces the flat AGENT_PRICE_USDC guess the
+  // moment it loads; null until the first fetch resolves (or if it fails,
+  // in which case the flat guess below is still shown as a fallback).
+  const [budgetRange, setBudgetRange] = useState<BudgetRange | null>(null);
+  // The director's most recent autonomous hiring decision — which agent it
+  // scouted and hired per modality for the batch currently shown in
+  // lastBatch below.
+  const [scoutSummary, setScoutSummary] = useState<ScoutSummary | null>(null);
   const [brand, setBrand] = useState({
     name: "",
     industry: "",
@@ -129,7 +169,28 @@ export default function DashboardPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
+    // Flat-guess fallback so the field is never empty/zero while the real
+    // range is loading (or if the fetch below fails).
     setBudget(+modalities.reduce((sum, m) => sum + AGENT_PRICE_USDC[m], 0).toFixed(6));
+
+    let cancelled = false;
+    fetch(`/api/content/budget-recommendation?modalities=${modalities.join(",")}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((range: BudgetRange | null) => {
+        if (cancelled || !range) return;
+        setBudgetRange(range);
+        // Default the field to the recommended minimum — the cheapest
+        // combination of real agents that can fulfill this request — rather
+        // than the old flat per-modality guess, which didn't reflect that
+        // some modalities now have multiple agents at different prices.
+        setBudget(range.min);
+      })
+      .catch(() => {
+        // Non-critical — the flat guess above stays as the fallback.
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [modalities]);
 
   useEffect(() => {
@@ -292,6 +353,7 @@ export default function DashboardPage() {
       const records: ContentRecord[] = data.records ?? [];
       setLastBatch(records);
       setHistory((h) => [...records, ...h]);
+      setScoutSummary(data.scoutSummary ?? null);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -404,6 +466,16 @@ export default function DashboardPage() {
               <div className="flex flex-wrap gap-2">
                 {ALL_MODALITIES.map((m) => {
                   const checked = modalities.includes(m);
+                  // Real per-modality range from the marketplace's registered
+                  // agents (multiple agents per modality now genuinely cost
+                  // different amounts) — falls back to the flat pricing.ts
+                  // guess until the range has loaded.
+                  const entry = budgetRange?.perModality.find((p) => p.modality === m);
+                  const priceLabel = entry
+                    ? entry.cheapest === entry.priciest
+                      ? `${entry.cheapest}`
+                      : `${entry.cheapest}-${entry.priciest}`
+                    : `${AGENT_PRICE_USDC[m]}`;
                   return (
                     <label
                       key={m}
@@ -419,7 +491,7 @@ export default function DashboardPage() {
                         onChange={() => toggleModality(m)}
                         className="sr-only"
                       />
-                      {m} <span className="text-[10px] opacity-70">({AGENT_PRICE_USDC[m]})</span>
+                      {m} <span className="text-[10px] opacity-70">({priceLabel})</span>
                     </label>
                   );
                 })}
@@ -428,18 +500,26 @@ export default function DashboardPage() {
 
             <div>
               <label htmlFor="budget" className="mb-1 block text-xs text-muted">
-                Budget (USDC) — {modalities.join(" + ")} costs{" "}
-                {+modalities.reduce((sum, m) => sum + AGENT_PRICE_USDC[m], 0).toFixed(6)} total
+                Budget (USDC) — {modalities.join(" + ")} recommended{" "}
+                {budgetRange
+                  ? budgetRange.min === budgetRange.max
+                    ? `${budgetRange.min} total`
+                    : `${budgetRange.min}-${budgetRange.max} total`
+                  : `${+modalities.reduce((sum, m) => sum + AGENT_PRICE_USDC[m], 0).toFixed(6)} total`}
               </label>
               <input
                 id="budget"
                 type="number"
                 step="0.01"
-                min={+modalities.reduce((sum, m) => sum + AGENT_PRICE_USDC[m], 0).toFixed(6)}
+                min={budgetRange?.min ?? +modalities.reduce((sum, m) => sum + AGENT_PRICE_USDC[m], 0).toFixed(6)}
                 value={budget}
                 onChange={(e) => setBudget(parseFloat(e.target.value))}
                 className="w-full rounded-xl border border-border-subtle bg-background px-3 py-2 text-sm outline-none"
               />
+              <p className="mt-1 text-[11px] text-muted">
+                Higher budgets let the director hire pricier, higher-scoring agents where available — it always
+                scouts the best combination your budget affords.
+              </p>
             </div>
 
             <details className="rounded-xl border border-border-subtle bg-background p-3 text-sm">
@@ -476,11 +556,26 @@ export default function DashboardPage() {
                   {lastBatch.length} outputs generated from this brief:
                 </p>
               )}
+              {scoutSummary && (
+                <p className="rounded-lg border border-border-subtle bg-background p-2 text-[11px] text-muted">
+                  Director evaluated {scoutSummary.combinationsEvaluated} agent combination
+                  {scoutSummary.combinationsEvaluated === 1 ? "" : "s"} within budget and hired:{" "}
+                  {scoutSummary.selections
+                    .map((s) => `${s.agentName} for ${s.modality} (score ${s.score}, ${s.priceUsdc} USDC)`)
+                    .join("; ")}
+                  .
+                </p>
+              )}
               {lastBatch.map((record) => (
                 <div key={record.id} className="rounded-xl border border-neon-dim bg-neon/5 p-4 text-sm">
                   {lastBatch.length > 1 && (
                     <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-neon">
                       {record.modality}
+                    </div>
+                  )}
+                  {record.agentName && (
+                    <div className="mb-1 text-xs text-muted">
+                      Hired <span className="text-foreground">{record.agentName}</span> ({record.agentModel})
                     </div>
                   )}
                   <div className="text-muted">Evaluation score</div>
@@ -496,6 +591,12 @@ export default function DashboardPage() {
                         </>
                       )}
                   </p>
+                  {record.reserveDebitTxHash && (
+                    <p className="mt-1 text-[11px] text-muted">
+                      Refill-reserve debit: {record.costUsdc} testnet USDC → platform wallet (simulates the
+                      future mainnet OpenRouter refill)
+                    </p>
+                  )}
                   {record.videoStatus === "pending" && (
                     <p className="mt-2 flex items-center gap-2 rounded-lg border border-neon-dim/40 bg-neon/5 p-2 text-xs text-muted">
                       <Loader2 size={12} className="animate-spin" /> Video is rendering — usually a few minutes,
@@ -550,12 +651,22 @@ export default function DashboardPage() {
                 </div>
                 {expandedId === r.id && (
                   <>
-                    <p className="mt-2 text-xs text-muted">
+                    {r.agentName && (
+                      <p className="mt-2 text-xs text-muted">
+                        Hired <span className="text-foreground">{r.agentName}</span> ({r.agentModel})
+                      </p>
+                    )}
+                    <p className="mt-1 text-xs text-muted">
                       Production cost: <span className="text-foreground">{r.costUsdc} USDC</span>
                       {typeof r.developerShareUsdc === "number" && typeof r.platformShareUsdc === "number" && (
                         <> ({r.developerShareUsdc} to the agent's developer, {r.platformShareUsdc} platform fee)</>
                       )}
                     </p>
+                    {r.reserveDebitTxHash && (
+                      <p className="mt-1 text-[11px] text-muted">
+                        Refill-reserve debit: {r.costUsdc} testnet USDC → platform wallet
+                      </p>
+                    )}
                     {r.generationWarning && (
                       <p className="mt-2 rounded-lg border border-yellow-600/40 bg-yellow-500/10 p-2 text-xs text-yellow-500">
                         {r.generationWarning}

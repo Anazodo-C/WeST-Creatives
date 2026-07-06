@@ -62,7 +62,8 @@ function extractOpenRouterError(json: unknown, fallback: string): string {
 export async function callOpenRouterText(
   system: string,
   user: string,
-  maxTokens: number
+  maxTokens: number,
+  model: string = OPENROUTER_TEXT_MODEL
 ): Promise<string> {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -73,7 +74,7 @@ export async function callOpenRouterText(
       "X-Title": "West Creatives",
     },
     body: JSON.stringify({
-      model: OPENROUTER_TEXT_MODEL,
+      model,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -139,9 +140,18 @@ export async function enhancePrompt(
   }
 }
 
+/**
+ * `model` lets the director pass the specific text sub-agent's own model
+ * (e.g. Caption Wolf's google/gemini-2.5-flash-lite vs Prose Baron's
+ * google/gemini-3.5-flash) instead of always using the module-level
+ * default — see src/lib/agents/director.ts's scoutAgents/runMultiDirector.
+ * Defaults to OPENROUTER_TEXT_MODEL so any caller that doesn't care which
+ * agent is generating (or hasn't been updated) keeps working unchanged.
+ */
 export async function generateText(
   enhancedPrompt: string,
-  brand?: Partial<BrandProfile>
+  brand?: Partial<BrandProfile>,
+  model: string = OPENROUTER_TEXT_MODEL
 ): Promise<string> {
   const demoFallback = `${enhancedPrompt}\n\n(demo output) A punchy hook, three concrete value points, and a soft CTA tailored to ${
     brand?.targetAudience ?? "your audience"
@@ -155,7 +165,8 @@ export async function generateText(
     const text = await callOpenRouterText(
       "You are a viral copywriting agent. Write platform-native social copy or captions from the brief. No hashtags, no emojis, no markdown headers.",
       enhancedPrompt,
-      600
+      600,
+      model
     );
     return text;
   } catch (err) {

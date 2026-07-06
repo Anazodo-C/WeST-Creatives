@@ -94,6 +94,13 @@ export interface ContentRecord {
   id: string;
   creatorId: string;
   agentId: string;
+  // Which agent produced this record and what model backs it — set by
+  // /api/content/generate's response (the freshly-hired agent) and by
+  // /api/content/history's LEFT JOIN against the agents table (so past
+  // records show this too, not just the most recent batch). Undefined only
+  // if the agent row was deleted after the fact.
+  agentName?: string;
+  agentModel?: string;
   modality: ContentModality;
   // Shared by every record produced from the same submission — a
   // single-modality request gets a batch of one, a "text and image" request
@@ -113,6 +120,14 @@ export interface ContentRecord {
   // the UI explain *why* the output is a placeholder instead of leaving it
   // unexplained.
   generationWarning?: string;
+  // Testnet-USDC debit (see debitRefillReserve in src/lib/circle.ts) equal
+  // to this record's real-dollar costUsdc, moved from the platform's
+  // dedicated refill-reserve wallet to PLATFORM_WALLET_ADDRESS — a stand-in
+  // today (testnet only, per the hackathon's "test USDC only" constraint)
+  // for the mainnet refill flow ADR-0001 describes. Undefined/absent if the
+  // debit never ran (demo mode, reserve wallet unfunded, etc.).
+  reserveDebitTxHash?: string;
+  reserveDebitWarning?: string;
   // Set only for video content whose real render was submitted as an async
   // OpenRouter job (src/lib/agents/video.ts submitVideoJob) rather than
   // completed inline. "pending" until src/app/api/content/video-status's
@@ -141,7 +156,7 @@ export interface Transaction {
   fromWallet: string;
   toWallet: string;
   amountUsdc: number;
-  kind: "developer-payout" | "platform-fee" | "deposit" | "docking-fee";
+  kind: "developer-payout" | "platform-fee" | "deposit" | "docking-fee" | "refill-reserve-debit";
   createdAt: string;
   txHash?: string;
 }

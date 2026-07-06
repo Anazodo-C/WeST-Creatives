@@ -67,9 +67,20 @@ export function buildImageAttributes(
   };
 }
 
+/**
+ * `preferredModel` lets the director pass the specific image sub-agent's own
+ * model (e.g. Lumen Frame's flux.2-klein-4b vs Halo Studio's gpt-image-1)
+ * instead of always using the module-level default — see
+ * src/lib/agents/director.ts's scoutAgents/runMultiDirector. When set, it's
+ * tried first and OPENROUTER_IMAGE_MODEL/OPENROUTER_FALLBACK_IMAGE_MODEL
+ * become the fallback chain if it fails, so a picked agent never silently
+ * falls back to a *different* agent's model without at least trying its own
+ * first.
+ */
 export async function generateImage(
   attributes: ImagePromptAttributes,
-  brand?: Partial<BrandProfile>
+  brand?: Partial<BrandProfile>,
+  preferredModel?: string
 ): Promise<{ url: string; description: string; demo: boolean; warning?: string }> {
   const compiledPrompt = [
     attributes.subject,
@@ -93,12 +104,12 @@ export async function generateImage(
     return placeholder();
   }
 
-  // Try the primary (cheapest) model first, then one fallback on a
-  // different model/provider if that fails — a single transient
-  // provider-side error (or a persistently low-fidelity result from the
-  // cheap model) shouldn't be the end of the attempt.
-  const attempts = [OPENROUTER_IMAGE_MODEL, OPENROUTER_FALLBACK_IMAGE_MODEL].filter(
-    (m, i, arr) => arr.indexOf(m) === i
+  // Try the picked agent's own model first (if given), then the module
+  // default and its fallback — a single transient provider-side error (or a
+  // persistently low-fidelity result from one model) shouldn't be the end of
+  // the attempt.
+  const attempts = [preferredModel, OPENROUTER_IMAGE_MODEL, OPENROUTER_FALLBACK_IMAGE_MODEL].filter(
+    (m, i, arr): m is string => !!m && arr.indexOf(m) === i
   );
 
   let lastWarning = "";

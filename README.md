@@ -89,31 +89,39 @@ The function and its route (`src/app/api/wallets/faucet/route.ts`) are still
 there; swap the external link back to a real in-app request once a key with
 faucet access confirms it actually works.
 
-### Provisioning the 5 seed agents (wallets + onchain identity)
+### Provisioning the seed agents (wallets + onchain identity)
 
-The marketplace ships seeded with 5 demo agents (Nova Director, Lumen Frame,
-Reel Runner, Echo Voice, Caption Wolf) with `walletAddress: null` and no
-onchain identity until you run this once. Four steps, in order:
+The marketplace ships seeded with a director plus 2-3 sub-agents per content
+type — 12 demo agents total (Nova Director; image: Lumen Frame, Grain &
+Gloss, Halo Studio; video: Reel Runner, Cine Veo; audio: Echo Voice, Turbo
+Teller, Flash Bark; text: Caption Wolf, Prose Baron, Deal Hacker), each with
+its own real model and price (see the `demoAgents` array in `src/lib/db.ts` —
+seeding is an upsert-by-name that runs on every boot, so editing that array
+and restarting is enough to add/adjust an agent without a migration).
+Agents ship with `walletAddress: null` and no onchain identity until you run
+this once. Four steps, in order:
 
 1. **Create their real Circle wallets:**
    ```bash
    node scripts/provision-seed-wallets.mjs
    ```
-   Reads `CIRCLE_API_KEY`/`CIRCLE_ENTITY_SECRET` from `.env`, creates 5 real
-   developer-controlled wallets on Arc Testnet, and prints each agent's
-   address.
+   Reads `CIRCLE_API_KEY`/`CIRCLE_ENTITY_SECRET` from `.env`, creates one
+   real developer-controlled wallet per seed agent on Arc Testnet, and
+   prints each agent's address. Update the `agentNames` array at the top of
+   that script if you've added/renamed agents in `demoAgents`.
 
-2. **Paste those addresses** into the `demoAgents` array in `src/lib/db.ts`
-   (replace the `null` `walletAddress` fields), so every fresh environment —
-   local, CI, Vercel — seeds with the same real, persistent addresses
-   instead of generating throwaway ones.
+2. **Assign those addresses** to the matching agent rows (e.g. `UPDATE
+   agents SET walletAddress = ? WHERE name = ?` per printed line, or a small
+   one-off script) so every fresh environment — local, CI, Vercel — ends up
+   with the same real, persistent addresses instead of generating throwaway
+   ones.
 
 3. **Seed the database** by starting the app once (`npm run dev`, load any
-   page) — this inserts the 5 agents with their real wallet addresses and
+   page) — this inserts (or updates) every agent in `demoAgents` and
    assigns each a local database id.
 
 4. **Register their onchain identity** on Arc Testnet's ERC-8004
-   IdentityRegistry, all 5 in one pass:
+   IdentityRegistry, all of them in one pass:
    ```bash
    npm run register-seed-agents
    ```
@@ -128,7 +136,7 @@ onchain identity until you run this once. Four steps, in order:
    others.
 
    To register a single agent instead (e.g. one a developer registers later
-   from the Dashboard, not one of the 5 seed agents):
+   from the Dashboard, not one of the seed agents):
    ```bash
    npm run register-agent -- --agentId=<id-from-agents-table>
    ```
@@ -221,7 +229,7 @@ your Vercel domain, no path).
 Locally, SQLite just works with zero setup — skip this section for `npm run
 dev`. But Vercel's filesystem is wiped on every deploy, so if you deploy
 without a real database, every push resets all agents/wallets/content history
-back to the 5 seed agents. Railway's free Postgres plugin fixes that in about
+back to the seed agents. Railway's free Postgres plugin fixes that in about
 two minutes:
 
 1. Go to [railway.app](https://railway.app) → sign in (GitHub login is

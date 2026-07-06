@@ -167,6 +167,64 @@ export async function settlePaymentSplit(params: {
   }
 }
 
+export interface RefillReserveDebitResult {
+  txHash?: string;
+  demo: boolean;
+  warning?: string;
+}
+
+/**
+ * Debits `amountUsdc` of testnet USDC from the platform's dedicated "refill
+ * reserve" wallet (see getOrCreatePlatformReserveWallet in
+ * src/lib/platformWallet.ts) to PLATFORM_WALLET_ADDRESS, once per
+ * generation, for exactly the real-dollar amount that generation cost.
+ *
+ * This is deliberately separate from settlePaymentSplit's 90/10 creator ->
+ * developer/platform split above — that's the marketplace's own creator-
+ * facing economics. This debit models a *different* thing per the hackathon
+ * constraint (all payments must be testnet USDC today, Arc mainnet isn't
+ * live yet): the amount of real USDC the platform would need to convert into
+ * provider credits (OpenRouter, ElevenLabs, etc.) to cover what was just
+ * spent. Recorded here in testnet USDC now as a stand-in for that future
+ * mainnet refill flow — see docs/adr/0001-automatic-openrouter-usdc-topup.md.
+ *
+ * Never throws — same demo-safe pattern as settlePaymentSplit; a reserve
+ * wallet that isn't funded (or CIRCLE_DEMO_MODE) degrades to a recorded-but-
+ * unsettled result instead of failing the content-generation request.
+ */
+export async function debitRefillReserve(params: {
+  reserveWalletId: string | null;
+  amountUsdc: number;
+}): Promise<RefillReserveDebitResult> {
+  const client = await getClient();
+  const platformAddress = process.env.PLATFORM_WALLET_ADDRESS;
+  if (!client || !params.reserveWalletId || !platformAddress) {
+    return { demo: true };
+  }
+
+  try {
+    const tx = await client.createTransaction({
+      walletId: params.reserveWalletId,
+      tokenId: process.env.ARC_USDC_TOKEN_ID,
+      destinationAddress: platformAddress,
+      amount: [params.amountUsdc.toString()],
+      fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+    } as never);
+
+    return {
+      txHash: (tx as { data?: { id?: string } })?.data?.id,
+      demo: false,
+    };
+  } catch (err) {
+    // Common causes on testnet: empty reserve wallet balance, or the reserve
+    // wallet not yet created for this deployment.
+    return {
+      demo: true,
+      warning: err instanceof Error ? err.message : "Refill-reserve debit failed, recorded as unsettled.",
+    };
+  }
+}
+
 export interface FaucetDripResult {
   demo: boolean;
   message: string;

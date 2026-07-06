@@ -3,8 +3,9 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { getDb } from "@/lib/db";
 import { runMultiDirector } from "@/lib/agents/director";
-import { settlePaymentSplit, giveFeedback } from "@/lib/circle";
-import { getOrCreatePlatformValidatorWallet } from "@/lib/platformWallet";
+import type { CandidateAgent } from "@/lib/agents/scout";
+import { settlePaymentSplit, giveFeedback, debitRefillReserve } from "@/lib/circle";
+import { getOrCreatePlatformValidatorWallet, getOrCreatePlatformReserveWallet } from "@/lib/platformWallet";
 import type { ContentModality, MultiContentRequest } from "@/lib/types";
 
 const CONTENT_MODALITY = z.enum(["text", "image", "video", "audio"]);
@@ -42,7 +43,27 @@ const bodySchema = z
     message: "Provide either modality or modalities.",
   });
 
-type AgentRow = { id: string; walletAddress: string | null; onchainAgentId: string | null };
+type AgentRow = {
+  id: string;
+  name: string;
+  model: string;
+  priceUsdc: number;
+  score: number;
+  walletAddress: string | null;
+  onchainAgentId: string | null;
+};
+
+function toCandidateAgent(row: AgentRow): CandidateAgent {
+  return {
+    id: row.id,
+    name: row.name,
+    model: row.model,
+    priceUsdc: row.priceUsdc,
+    score: row.score,
+    walletAddress: row.walletAddress,
+    onchainAgentId: row.onchainAgentId,
+  };
+}
 
 export async function POST(req: NextRequest) {
   const json = await req.json().catch(() => null);
@@ -61,25 +82,49 @@ export async function POST(req: NextRequest) {
 
   const request: MultiContentRequest = { ...rest, modalities: uniqueModalities };
 
-  let agentRows: Record<ContentModality, AgentRow>;
+  // candidatesByModality holds every public agent available for each
+  // requested modality — the director's scoutAgents (src/lib/agents/scout.ts)
+  // brute-forces the best-affordable combination from these, rather than
+  // this route pre-picking a single "best" agent itself. An explicit
+  // `agentId` override (API flexibility, not surfaced in the dashboard UI)
+  // still short-circuits scouting: that one agent becomes the sole
+  // candidate for every requested modality, same as before.
+  let candidatesByModality: Partial<Record<ContentModality, CandidateAgent[]>> = {};
+  let agentsById: Record<string, AgentRow> = {};
   try {
     const db = await getDb();
-    const entries = await Promise.all(
-      uniqueModalities.map(async (m) => {
-        const row = agentId
-          ? await db.get<AgentRow>("SELECT * FROM agents WHERE id = ?", [agentId])
-          : await db.get<AgentRow>("SELECT * FROM agents WHERE type = ? ORDER BY score DESC LIMIT 1", [m]);
-        return [m, row] as const;
-      })
-    );
-    const missing = entries.filter(([, row]) => !row).map(([m]) => m);
-    if (missing.length > 0) {
-      return NextResponse.json(
-        { error: `No agent available for modality ${missing.join(", ")}` },
-        { status: 404 }
+    if (agentId) {
+      const row = await db.get<AgentRow>(
+        "SELECT id, name, model, priceUsdc, score, walletAddress, onchainAgentId FROM agents WHERE id = ?",
+        [agentId]
       );
+      if (!row) {
+        return NextResponse.json({ error: `No agent found with id ${agentId}` }, { status: 404 });
+      }
+      candidatesByModality = Object.fromEntries(uniqueModalities.map((m) => [m, [toCandidateAgent(row)]]));
+      agentsById = { [row.id]: row };
+    } else {
+      const entries = await Promise.all(
+        uniqueModalities.map(async (m) => {
+          const rows = await db.all<AgentRow>(
+            "SELECT id, name, model, priceUsdc, score, walletAddress, onchainAgentId FROM agents WHERE type = ? AND visibility = 'public' ORDER BY score DESC",
+            [m]
+          );
+          return [m, rows] as const;
+        })
+      );
+      const missing = entries.filter(([, rows]) => rows.length === 0).map(([m]) => m);
+      if (missing.length > 0) {
+        return NextResponse.json(
+          { error: `No agent available for modality ${missing.join(", ")}` },
+          { status: 404 }
+        );
+      }
+      candidatesByModality = Object.fromEntries(
+        entries.map(([m, rows]) => [m, rows.map(toCandidateAgent)])
+      );
+      agentsById = Object.fromEntries(entries.flatMap(([, rows]) => rows.map((r) => [r.id, r])));
     }
-    agentRows = Object.fromEntries(entries) as Record<ContentModality, AgentRow>;
   } catch (err) {
     // A DB-layer failure here (bad DATABASE_URL, connection refused, schema
     // drift on a not-yet-migrated Postgres instance, etc.) previously threw
@@ -97,16 +142,21 @@ export async function POST(req: NextRequest) {
 
   try {
     const db = await getDb();
-    const agentIdByModality = Object.fromEntries(
-      uniqueModalities.map((m) => [m, agentRows[m].id])
-    ) as Record<ContentModality, string>;
 
-    const { batchId, records } = await runMultiDirector(request, agentIdByModality);
+    const { batchId, records, selections, combinationsEvaluated } = await runMultiDirector(
+      request,
+      candidatesByModality
+    );
 
     const creatorWallet = await db.get<{ id: string }>(
       "SELECT id FROM wallets WHERE ownerId = ? ORDER BY createdAt DESC LIMIT 1",
       [request.creatorId]
     );
+
+    // Looked up once per request rather than per record — every record in
+    // this batch debits the same reserve wallet, and a wallet lookup/create
+    // should never happen more than once per request.
+    const reserveWallet = await getOrCreatePlatformReserveWallet();
 
     const responseRecords = [];
 
@@ -115,7 +165,7 @@ export async function POST(req: NextRequest) {
     // different developer wallet to pay), so this can't be collapsed into a
     // single settlement the way one-modality requests could.
     for (const record of records) {
-      const agentRow = agentRows[record.modality];
+      const agentRow = agentsById[record.agentId];
       const developerShare = +(record.costUsdc * 0.9).toFixed(6);
       const platformShare = +(record.costUsdc * 0.1).toFixed(6);
 
@@ -124,6 +174,17 @@ export async function POST(req: NextRequest) {
         developerWalletAddress: agentRow.walletAddress ?? "0xdemoDeveloperWallet",
         platformWalletAddress: process.env.PLATFORM_WALLET_ADDRESS ?? "0xdemoPlatformWallet",
         totalUsdc: record.costUsdc,
+      });
+
+      // Testnet-USDC debit equal to this record's real-dollar cost, from
+      // the platform's refill-reserve wallet to PLATFORM_WALLET_ADDRESS —
+      // simulates (in test USDC, per the hackathon's constraint that all
+      // payments stay on testnet until Arc mainnet is live) the refill this
+      // generation would need on the real provider balance. Never blocks or
+      // fails the response — same demo-safe pattern as settlement/reputation.
+      const reserveDebit = await debitRefillReserve({
+        reserveWalletId: reserveWallet.id,
+        amountUsdc: record.costUsdc,
       });
 
       // Record this generation's evaluation as onchain reputation feedback
@@ -150,8 +211,8 @@ export async function POST(req: NextRequest) {
       }
 
       await db.run(
-        `INSERT INTO content_records (id, creatorId, agentId, modality, batchId, prompt, enhancedPrompt, output, evaluationJson, costUsdc, developerShareUsdc, platformShareUsdc, reputationTxHash, reputationWarning, generationWarning, videoJobId, videoPollingUrl, videoStatus, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO content_records (id, creatorId, agentId, modality, batchId, prompt, enhancedPrompt, output, evaluationJson, costUsdc, developerShareUsdc, platformShareUsdc, reputationTxHash, reputationWarning, generationWarning, videoJobId, videoPollingUrl, videoStatus, reserveDebitTxHash, reserveDebitWarning, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           record.id,
           record.creatorId,
@@ -171,6 +232,8 @@ export async function POST(req: NextRequest) {
           record.videoJobId ?? null,
           record.videoPollingUrl ?? null,
           record.videoStatus ?? null,
+          reserveDebit.txHash ?? null,
+          reserveDebit.demo ? reserveDebit.warning ?? null : null,
           record.createdAt,
         ]
       );
@@ -215,10 +278,32 @@ export async function POST(req: NextRequest) {
         settlementWarning: settlement.warning,
         reputationTxHash,
         reputationWarning,
+        reserveDebitTxHash: reserveDebit.txHash,
+        reserveDebitWarning: reserveDebit.demo ? reserveDebit.warning : undefined,
+        // Which agent the director actually hired for this modality, and
+        // what model backs it — the visible half of the autonomous
+        // selection (see scoutSummary below for the decision itself).
+        agentName: agentRow.name,
+        agentModel: agentRow.model,
       });
     }
 
-    return NextResponse.json({ batchId, records: responseRecords });
+    // The autonomous decision itself, surfaced for transparency/demo
+    // purposes — how many agent combinations the director evaluated and
+    // which one it picked per modality, alongside its combined score/cost.
+    const scoutSummary = {
+      combinationsEvaluated,
+      selections: selections.map((s) => ({
+        modality: s.modality,
+        agentId: s.agent.id,
+        agentName: s.agent.name,
+        model: s.agent.model,
+        priceUsdc: s.agent.priceUsdc,
+        score: s.agent.score,
+      })),
+    };
+
+    return NextResponse.json({ batchId, records: responseRecords, scoutSummary });
   } catch (err) {
     // Log the full error server-side (visible in Vercel's function logs)
     // even though the client only gets a short message — every sub-agent

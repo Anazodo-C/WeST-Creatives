@@ -77,10 +77,16 @@ export interface VideoJobResult {
 
 /** Plans the storyboard and, if OPENROUTER_API_KEY is set, submits it as a
  * real video-generation job. Never waits for the job to finish — see the
- * module comment above for why. */
+ * module comment above for why.
+ *
+ * `preferredModel` lets the director pass the specific video sub-agent's own
+ * model (e.g. Reel Runner's cheap seedance-2.0-fast vs Cine Veo's premium
+ * veo-3.1) instead of always using OPENROUTER_VIDEO_MODEL — see
+ * src/lib/agents/director.ts's scoutAgents/runMultiDirector. */
 export async function submitVideoJob(
   scenes: Scene[],
-  brand?: Partial<BrandProfile>
+  brand?: Partial<BrandProfile>,
+  preferredModel: string = OPENROUTER_VIDEO_MODEL
 ): Promise<VideoJobResult> {
   const storyboard = buildStoryboard(scenes);
 
@@ -111,7 +117,7 @@ export async function submitVideoJob(
         "X-Title": "West Creatives",
       },
       body: JSON.stringify({
-        model: OPENROUTER_VIDEO_MODEL,
+        model: preferredModel,
         prompt,
         duration: VIDEO_DURATION_SECONDS,
         ...(callbackUrl ? { callback_url: callbackUrl } : {}),
@@ -157,7 +163,7 @@ export async function submitVideoJob(
       storyboard: `${storyboard}\n\n(video is rendering — usually a few minutes; this will update automatically once it's ready)`,
       jobId,
       pollingUrl,
-      model: OPENROUTER_VIDEO_MODEL,
+      model: preferredModel,
     };
   } catch (err) {
     const message = cleanErrorMessage(err);

@@ -1,7 +1,9 @@
 // One-time provisioning: create real Arc Testnet wallets (via Circle
-// Developer-Controlled Wallets) for the platform's five seed agents, so
+// Developer-Controlled Wallets) for the platform's seed agents, so
 // the seed data in src/lib/db.ts can ship with real, persistent addresses
 // instead of null. Run with: node scripts/provision-seed-wallets.mjs
+// Keep agentNames below in sync with the `demoAgents` array in
+// src/lib/db.ts if you add/rename/remove a seed agent.
 import fs from "node:fs";
 import path from "node:path";
 
@@ -27,7 +29,20 @@ const client = initiateDeveloperControlledWalletsClient({
   entitySecret: env.CIRCLE_ENTITY_SECRET,
 });
 
-const agentNames = ["Nova Director", "Lumen Frame", "Reel Runner", "Echo Voice", "Caption Wolf"];
+const agentNames = [
+  "Nova Director",
+  "Lumen Frame",
+  "Grain & Gloss",
+  "Halo Studio",
+  "Reel Runner",
+  "Cine Veo",
+  "Echo Voice",
+  "Turbo Teller",
+  "Flash Bark",
+  "Caption Wolf",
+  "Prose Baron",
+  "Deal Hacker",
+];
 
 let walletSetId = env.CIRCLE_WALLET_SET_ID;
 if (!walletSetId) {

@@ -86,6 +86,12 @@ const SCHEMA_SQL = `
     -- failed (see reputationWarning).
     reputationTxHash TEXT,
     reputationWarning TEXT,
+    -- Testnet USDC debit equal to this record's real-dollar cost, moved from
+    -- the platform's refill-reserve wallet to PLATFORM_WALLET_ADDRESS (see
+    -- debitRefillReserve in src/lib/circle.ts). NULL in demo mode or if the
+    -- reserve wallet isn't funded.
+    reserveDebitTxHash TEXT,
+    reserveDebitWarning TEXT,
     -- Set when real generation (currently just image.ts's Gemini call) fell
     -- back to a demo placeholder — see ContentRecord.generationWarning in
     -- src/lib/types.ts.
@@ -207,6 +213,12 @@ async function initPostgres(connectionString: string): Promise<DbClient> {
     .catch(() => {});
   await pool.query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS videoStatus TEXT").catch(() => {});
   await pool.query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS batchId TEXT").catch(() => {});
+  await pool
+    .query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS reserveDebitTxHash TEXT")
+    .catch(() => {});
+  await pool
+    .query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS reserveDebitWarning TEXT")
+    .catch(() => {});
 
   const client: DbClient = {
     async get(sql, params = []) {
@@ -278,6 +290,16 @@ async function initSqlite(): Promise<DbClient> {
   } catch {
     // already exists — fine
   }
+  try {
+    db.exec("ALTER TABLE content_records ADD COLUMN reserveDebitTxHash TEXT");
+  } catch {
+    // already exists — fine
+  }
+  try {
+    db.exec("ALTER TABLE content_records ADD COLUMN reserveDebitWarning TEXT");
+  } catch {
+    // already exists — fine
+  }
 
   const client: DbClient = {
     // node:sqlite's DatabaseSync is synchronous under the hood; wrapped in
@@ -299,81 +321,242 @@ async function initSqlite(): Promise<DbClient> {
   return client;
 }
 
+/**
+ * Platform-owned agent roster — one director plus 2-3 sub-agents per content
+ * type, each backed by a genuinely different underlying model and priced
+ * differently, so the director's budget-based selection (see
+ * src/lib/agents/director.ts's scoutAgents) has real choices to make instead
+ * of always picking the one agent that happens to exist per modality.
+ *
+ * Every `model` slug here is real and independently verified against
+ * OpenRouter's own documentation/catalog (not guessed) before being wired
+ * in — this codebase has been bitten twice already by invented/mistyped
+ * model slugs (see image.ts's module comment and the seedream-4.5 fix), so
+ * that verification step matters:
+ *   - text: google/gemini-2.5-flash-lite, google/gemini-3.5-flash,
+ *     deepseek/deepseek-v4-flash — all present in OpenRouter's public
+ *     /api/v1/models catalog.
+ *   - image: black-forest-labs/flux.2-klein-4b (already live in image.ts),
+ *     bytedance-seed/seedream-4.5 (OpenRouter's own Image API doc's
+ *     canonical example, $0.05/image), openai/gpt-image-1 (OpenRouter's
+ *     other canonical image-generation doc example).
+ *   - video: bytedance/seedance-2.0-fast (already live in video.ts),
+ *     google/veo-3.1 (OpenRouter's own Video Generation doc's canonical
+ *     example model, ~$0.50-0.75/video-second — a genuinely pricier,
+ *     higher-quality tier, not just a relabeled duplicate).
+ *   - audio: three distinct ElevenLabs model_ids (not OpenRouter — audio.ts
+ *     calls ElevenLabs directly), each a real, stable ElevenLabs model:
+ *     eleven_multilingual_v2 (quality narration), eleven_turbo_v2_5 (fast/
+ *     cheap), eleven_flash_v2_5 (lowest-latency, cheapest).
+ */
+const demoAgents = [
+  {
+    name: "Nova Director",
+    type: "director",
+    description: "Plans budget-aware creative briefs and scouts the best sub-agents within budget.",
+    model: "claude-orchestrator-v1",
+    modality: "multi-modal",
+    scope: "general",
+    generationParadigm: "auto-regressive",
+    capabilities: ["planning", "budget-optimization", "brand-analysis"],
+    niche: "general marketing",
+    score: 92,
+    price: 0.05,
+  },
+  // ---- image ----
+  {
+    name: "Lumen Frame",
+    type: "image",
+    description: "Fast, cheap hero shots — best when volume matters more than fine detail.",
+    model: "black-forest-labs/flux.2-klein-4b",
+    modality: "unimodal",
+    scope: "specialized",
+    generationParadigm: "diffusion",
+    capabilities: ["fast-generation", "low-cost", "hero-composition"],
+    niche: "product photography",
+    score: 78,
+    price: 0.02,
+  },
+  {
+    name: "Grain & Gloss",
+    type: "image",
+    description: "Richer product photography with stronger prompt adherence, mid-tier cost.",
+    model: "bytedance-seed/seedream-4.5",
+    modality: "unimodal",
+    scope: "specialized",
+    generationParadigm: "diffusion",
+    capabilities: ["multi-image-composition", "prompt-adherence", "texture-detail"],
+    niche: "product photography",
+    score: 88,
+    price: 0.05,
+  },
+  {
+    name: "Halo Studio",
+    type: "image",
+    description: "Premium tier — sharp text-in-image rendering and character consistency.",
+    model: "openai/gpt-image-1",
+    modality: "unimodal",
+    scope: "specialized",
+    generationParadigm: "diffusion",
+    capabilities: ["text-rendering", "character-consistency", "multi-turn-generation"],
+    niche: "brand campaigns",
+    score: 95,
+    price: 0.1,
+  },
+  // ---- video ----
+  {
+    name: "Reel Runner",
+    type: "video",
+    description: "Fast, cheap short-form social clips — good default for volume content.",
+    model: "bytedance/seedance-2.0-fast",
+    modality: "cross-modal",
+    scope: "specialized",
+    generationParadigm: "diffusion",
+    capabilities: ["fast-generation", "low-cost", "camera-language"],
+    niche: "short-form social video",
+    score: 80,
+    price: 0.45,
+  },
+  {
+    name: "Cine Veo",
+    type: "video",
+    description: "Premium cinematic tier with synced audio — for hero/launch content.",
+    model: "google/veo-3.1",
+    modality: "cross-modal",
+    scope: "specialized",
+    generationParadigm: "diffusion",
+    capabilities: ["cinematic-quality", "synced-audio", "reference-to-video"],
+    niche: "brand launch video",
+    score: 96,
+    price: 2.5,
+  },
+  // ---- audio ----
+  {
+    name: "Echo Voice",
+    type: "audio",
+    description: "Natural narration and dialogue with a consistent voice profile.",
+    model: "eleven_multilingual_v2",
+    modality: "unimodal",
+    scope: "specialized",
+    generationParadigm: "auto-regressive",
+    capabilities: ["dialogue", "voice-consistency", "multilingual"],
+    niche: "podcast & narration",
+    score: 89,
+    price: 0.08,
+  },
+  {
+    name: "Turbo Teller",
+    type: "audio",
+    description: "Fast, cheap voiceover for quick social clips — lower fidelity than Echo Voice.",
+    model: "eleven_turbo_v2_5",
+    modality: "unimodal",
+    scope: "specialized",
+    generationParadigm: "auto-regressive",
+    capabilities: ["low-latency", "low-cost", "voiceover"],
+    niche: "short-form social video",
+    score: 76,
+    price: 0.03,
+  },
+  {
+    name: "Flash Bark",
+    type: "audio",
+    description: "Ultra-low-latency stingers and sound effects — cheapest audio tier.",
+    model: "eleven_flash_v2_5",
+    modality: "unimodal",
+    scope: "specialized",
+    generationParadigm: "auto-regressive",
+    capabilities: ["sound-effects", "ultra-low-latency", "low-cost"],
+    niche: "podcast & narration",
+    score: 70,
+    price: 0.015,
+  },
+  // ---- text ----
+  {
+    name: "Caption Wolf",
+    type: "text",
+    description: "Viral captions and platform-native copy for X, Reddit, LinkedIn.",
+    model: "google/gemini-2.5-flash-lite",
+    modality: "unimodal",
+    scope: "specialized",
+    generationParadigm: "auto-regressive",
+    capabilities: ["captioning", "social-copy", "hook-writing"],
+    niche: "social growth",
+    score: 90,
+    price: 0.02,
+  },
+  {
+    name: "Prose Baron",
+    type: "text",
+    description: "Long-form brand storytelling and premium copywriting.",
+    model: "google/gemini-3.5-flash",
+    modality: "unimodal",
+    scope: "specialized",
+    generationParadigm: "auto-regressive",
+    capabilities: ["long-form-copy", "storytelling", "brand-voice"],
+    niche: "brand campaigns",
+    score: 93,
+    price: 0.06,
+  },
+  {
+    name: "Deal Hacker",
+    type: "text",
+    description: "Cheapest bulk-tier captions and ad-copy variations.",
+    model: "deepseek/deepseek-v4-flash",
+    modality: "unimodal",
+    scope: "specialized",
+    generationParadigm: "auto-regressive",
+    capabilities: ["bulk-variations", "low-cost", "ad-copy"],
+    niche: "social growth",
+    score: 72,
+    price: 0.01,
+  },
+];
+
 async function seedIfEmpty(db: DbClient) {
-  const row = await db.get<{ c: number }>("SELECT COUNT(*) as c FROM agents");
-  if (row && Number(row.c) > 0) return;
+  // Upsert by name (not just "insert if the table is fully empty", and not
+  // just "insert if missing") so a database created by an earlier version
+  // of this file — back when there was only one agent per content type, and
+  // `model` was purely cosmetic — gets those existing rows' model/price/
+  // description corrected too, not just gains the new sub-agents alongside
+  // stale ones. That correction matters now: `model` used to be decorative
+  // (every generation call used a fixed env-var model regardless of which
+  // agent was picked), but scoutAgents/runMultiDirector now actually pass
+  // the chosen agent's `model` into the real API call — a legacy row still
+  // holding a placeholder string like "imagen-brand-v2" would silently fail
+  // real generation for that specific agent otherwise. walletAddress,
+  // onchainAgentId, and transactionCount are preserved on update since
+  // those are per-deployment state, not part of the seed definition.
+  const existing = await db.all<{ id: string; name: string }>(
+    "SELECT id, name FROM agents WHERE developerId = 'platform-genesis-developer'"
+  );
+  const existingByName = new Map(existing.map((r) => [r.name, r.id]));
 
   const now = new Date().toISOString();
-  const demoAgents = [
-    {
-      name: "Nova Director",
-      type: "director",
-      description: "Plans budget-aware creative briefs and hires the right sub-agents.",
-      model: "claude-orchestrator-v1",
-      modality: "multi-modal",
-      scope: "general",
-      generationParadigm: "auto-regressive",
-      capabilities: ["planning", "budget-optimization", "brand-analysis"],
-      niche: "general marketing",
-      score: 92,
-      price: 0.05,
-    },
-    {
-      name: "Lumen Frame",
-      type: "image",
-      description: "Multi-image composition and text rendering with strict brand-color adherence.",
-      model: "imagen-brand-v2",
-      modality: "unimodal",
-      scope: "specialized",
-      generationParadigm: "diffusion",
-      capabilities: ["multi-image-composition", "multi-turn-generation", "text-rendering"],
-      niche: "product photography",
-      score: 88,
-      price: 0.12,
-    },
-    {
-      name: "Reel Runner",
-      type: "video",
-      description: "Scene-by-scene cinematic video generation with first/last frame control.",
-      model: "veo-scene-v1",
-      modality: "cross-modal",
-      scope: "specialized",
-      generationParadigm: "diffusion",
-      capabilities: ["reference-to-video", "first-last-frame-control", "camera-language"],
-      niche: "short-form social video",
-      score: 84,
-      price: 0.45,
-    },
-    {
-      name: "Echo Voice",
-      type: "audio",
-      description: "Dialogue and sound-effect generation with a consistent voice profile.",
-      model: "elevenlabs-voice-v1",
-      modality: "unimodal",
-      scope: "specialized",
-      generationParadigm: "auto-regressive",
-      capabilities: ["dialogue", "sound-effects", "voice-consistency"],
-      niche: "podcast & narration",
-      score: 81,
-      price: 0.08,
-    },
-    {
-      name: "Caption Wolf",
-      type: "text",
-      description: "Viral captions and platform-native copy for X, Reddit, LinkedIn.",
-      model: "claude-copy-v1",
-      modality: "unimodal",
-      scope: "specialized",
-      generationParadigm: "auto-regressive",
-      capabilities: ["captioning", "social-copy", "hook-writing"],
-      niche: "social growth",
-      score: 90,
-      price: 0.02,
-    },
-  ];
+  let rank = existing.length;
 
-  for (let i = 0; i < demoAgents.length; i++) {
-    const a = demoAgents[i];
+  for (const a of demoAgents) {
+    const existingId = existingByName.get(a.name);
+    if (existingId) {
+      await db.run(
+        `UPDATE agents SET description = ?, type = ?, capabilities = ?, model = ?, nicheIndustry = ?, modality = ?, scope = ?, generationParadigm = ?, score = ?, priceUsdc = ? WHERE id = ?`,
+        [
+          a.description,
+          a.type,
+          JSON.stringify(a.capabilities),
+          a.model,
+          a.niche,
+          a.modality,
+          a.scope,
+          a.generationParadigm,
+          a.score,
+          a.price,
+          existingId,
+        ]
+      );
+      continue;
+    }
+
+    rank += 1;
     await db.run(
       `INSERT INTO agents (id, name, developerId, description, type, capabilities, model, nicheSocialMedia, nicheIndustry, modality, scope, generationParadigm, rank, score, transactionCount, priceUsdc, walletAddress, createdAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -390,7 +573,7 @@ async function seedIfEmpty(db: DbClient) {
         a.modality,
         a.scope,
         a.generationParadigm,
-        i + 1,
+        rank,
         a.score,
         Math.floor(Math.random() * 400) + 20,
         a.price,

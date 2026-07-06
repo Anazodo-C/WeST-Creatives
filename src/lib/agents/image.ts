@@ -1,21 +1,23 @@
 /**
  * Image agent workflow: brand analysis -> design concept -> idea image -> evaluate.
- * Provider: fal.ai, running FLUX.1 [dev] ("fal-ai/flux/dev") via the
- * @fal-ai/client SDK. Falls back to a placeholder data-URI description when
- * FAL_KEY is unset.
+ * Provider: Gemini's native image generation ("gemini-2.5-flash-image", aka
+ * Nano Banana) via @google/genai, Google's current unified SDK. Falls back
+ * to a placeholder data-URI description when GOOGLE_API_KEY is unset.
  *
- * Previously used Google's Gemini image model (gemini-2.5-flash-image) —
- * abandoned after confirming (via a real, billed-account-less API key) that
- * this model's free tier is a hard 0 requests/day: every real call returns
- * RESOURCE_EXHAUSTED immediately, regardless of usage, unless a Google Cloud
- * billing account is attached. Claude/Anthropic has no image-generation
- * capability at all, so it was never an option either. fal.ai's pay-as-you-go
- * pricing (~$0.025/megapixel for flux/dev, no forced GCP-style billing setup)
- * and small signup credit made it the more practical default here.
+ * IMPORTANT: this model's free tier is a hard 0 requests/day — every real
+ * call fails with RESOURCE_EXHAUSTED immediately, no matter how little it's
+ * used, unless the Google Cloud project behind GOOGLE_API_KEY has a billing
+ * account attached. Generating a *new* key from the same unbilled project
+ * hits the exact same wall — the limit is per-project, not per-key. Enable
+ * billing at console.cloud.google.com (Billing) for whichever project
+ * aistudio.google.com/apikey shows this key belongs to, or create a fresh
+ * project with billing enabled first and generate the key from that one.
+ * (Briefly swapped to fal.ai to sidestep this, then switched back per
+ * request — if this starts failing again, that swap is the fallback.)
  */
 import type { BrandProfile } from "@/lib/types";
 
-const FAL_KEY = process.env.FAL_KEY;
+const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
 
 interface ImagePromptAttributes {
   subject: string;
@@ -62,59 +64,60 @@ export async function generateImage(
     warning,
   });
 
-  if (!FAL_KEY) {
+  if (!GOOGLE_API_KEY) {
     return placeholder();
   }
 
   try {
-    const { fal } = await import("@fal-ai/client");
-    fal.config({ credentials: FAL_KEY });
-
-    const result = await fal.subscribe("fal-ai/flux/dev", {
-      input: {
-        prompt: compiledPrompt,
-        image_size: "square_hd",
-        // Ask for a base64 data URI directly rather than a hosted CDN link,
-        // so the output is fully self-contained in our own DB/response —
-        // consistent with every other modality here — instead of depending
-        // on fal's link staying reachable indefinitely. If a provider
-        // response ever comes back as a hosted URL anyway (e.g. this flag
-        // not being honored for some future model), the dashboard's output
-        // renderer still handles that case too.
-        sync_mode: true,
+    const { GoogleGenAI } = await import("@google/genai");
+    const ai = new GoogleGenAI({ apiKey: GOOGLE_API_KEY });
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash-image",
+      contents: compiledPrompt,
+      // Required: without this, the model can (and often does) just answer
+      // conversationally with text and no inlineData part at all — no error
+      // thrown, it just silently never returns an image. Not documented as
+      // a hard requirement anywhere on Google's page, but every non-trivial
+      // official sample sets it, and its absence is the most common cause
+      // of "real key set, still get the placeholder, no error in sight."
+      config: {
+        responseModalities: ["TEXT", "IMAGE"],
       },
-      logs: false,
     });
 
-    const image = (result.data as { images?: { url?: string; content_type?: string }[] })?.images?.[0];
+    const part = response.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data);
+    const base64 = part?.inlineData?.data;
+    const mimeType = part?.inlineData?.mimeType || "image/png";
 
-    if (!image?.url) {
-      console.error("[generateImage] fal.ai returned no image:", JSON.stringify(result.data).slice(0, 300));
-      return placeholder("fal.ai returned no image data.");
+    if (!base64) {
+      // The call succeeded but returned no image bytes — most likely the
+      // model responded with text only (safety refusal, or just chose not
+      // to render an image for this prompt). Log the text it *did* return
+      // so this is diagnosable from Vercel function logs instead of a
+      // silent, unexplained placeholder.
+      const textPart = response.candidates?.[0]?.content?.parts?.find((p) => p.text);
+      const reason = textPart?.text?.slice(0, 200) || "Model returned no image data and no explanatory text.";
+      console.error("[generateImage] no inlineData in response:", reason);
+      return placeholder(`Gemini returned no image: ${reason}`);
     }
 
     return {
-      url: image.url,
+      url: `data:${mimeType};base64,${base64}`,
       description: compiledPrompt,
       demo: false,
     };
   } catch (err) {
-    // fal.ai's SDK throws an ApiError with `.status` + `.body` holding the
-    // actual API response (e.g. {"detail": "User is locked. Reason:
-    // Exhausted balance..."} for a 403) — err.message alone is often just a
-    // generic HTTP status summary like "Forbidden", which isn't enough to
-    // diagnose anything. Pull the real body detail out when it's there.
-    const apiErr = err as { status?: number; body?: { detail?: unknown } };
-    const bodyDetail =
-      typeof apiErr?.body?.detail === "string" ? apiErr.body.detail : JSON.stringify(apiErr?.body ?? {});
-    const message =
-      apiErr?.body?.detail || apiErr?.body
-        ? `HTTP ${apiErr.status}: ${bodyDetail}`
-        : err instanceof Error
-          ? err.message
-          : "Unknown error";
-    console.error("[generateImage] fal.ai call failed:", message);
-    return placeholder(`fal.ai image generation failed, used a placeholder instead: ${message}`);
+    // Common causes: expired/invalid key, or billing not enabled — this
+    // model's pricing page lists NO free tier at all, so a key that works
+    // fine for other Google APIs can still fail here specifically if the
+    // linked Google Cloud project has no billing account attached. err here
+    // is typically an @google/genai ApiError whose .message already includes
+    // the full raw API error JSON (code/status/quota details), so no extra
+    // unwrapping is needed the way fal.ai's SDK required — just make sure
+    // it's actually logged and surfaced, not swallowed.
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("[generateImage] real Gemini call failed:", message);
+    return placeholder(`Gemini image generation failed, used a placeholder instead: ${message}`);
   }
 }
 
@@ -124,6 +127,6 @@ function placeholderSvg(label: string) {
     <rect width="100%" height="100%" fill="#111214"/>
     <rect x="20" y="20" width="760" height="760" fill="none" stroke="#39ff88" stroke-width="2"/>
     <text x="50%" y="50%" fill="#39ff88" font-family="monospace" font-size="20" text-anchor="middle">${safe}</text>
-    <text x="50%" y="56%" fill="#9a9ba0" font-family="monospace" font-size="12" text-anchor="middle">placeholder — set FAL_KEY for real generation</text>
+    <text x="50%" y="56%" fill="#9a9ba0" font-family="monospace" font-size="12" text-anchor="middle">placeholder — set GOOGLE_API_KEY for real generation</text>
   </svg>`;
 }

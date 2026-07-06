@@ -1,6 +1,6 @@
-import Link from "next/link";
 import TypeDeleteText from "@/components/TypeDeleteText";
-import { ArrowRight, Wand2, Users, Coins, ShieldCheck, Gauge, Trophy } from "lucide-react";
+import HomeCta from "@/components/HomeCta";
+import { Wand2, Users, Coins, ShieldCheck, Gauge, Trophy } from "lucide-react";
 
 const flowSteps = [
   { title: "Sign up", desc: "Choose Creator or Developer, connect a wallet + Google.", icon: Users },
@@ -43,22 +43,7 @@ export default function Home() {
             />
           </div>
 
-          <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-            <Link
-              href="/signup?role=creator"
-              className="group flex items-center gap-2 rounded-full bg-neon px-7 py-3 font-semibold text-black transition-transform hover:scale-[1.03]"
-            >
-              I&apos;m a Creator
-              <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
-            </Link>
-            <Link
-              href="/signup?role=developer"
-              className="group flex items-center gap-2 rounded-full border border-border-subtle px-7 py-3 font-semibold text-foreground transition-colors hover:border-neon-dim"
-            >
-              I&apos;m a Developer
-              <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
-            </Link>
-          </div>
+          <HomeCta />
         </div>
       </section>
 

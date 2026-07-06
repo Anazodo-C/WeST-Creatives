@@ -26,7 +26,14 @@ Circle Gateway (x402). Built for the Canteen x Lepton Hackathon.
 
 Every external integration (Circle, Anthropic, Google, ElevenLabs) has a demo
 fallback, so `npm run dev` is fully clickable with zero keys. Add real keys to
-go live incrementally — nothing needs to be wired all at once.
+go live incrementally — nothing needs to be wired all at once. This fallback
+also covers the *real* key failing at runtime, not just being absent — e.g. an
+Anthropic account with a real key but a zero/negative credit balance, an
+expired Google/ElevenLabs key, or a transient network error. Every call site
+in `src/lib/agents/` catches these and degrades to its demo-mode output
+(with a note about what failed) rather than throwing an uncaught error up
+into a generic 500 — a briefing shouldn't fail outright just because one
+provider's billing lapsed.
 
 ## Setup
 
@@ -61,6 +68,19 @@ free project at cloud.reown.com, then in that project's settings add both
 and put the project id in `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` in `.env`.
 
 **Never commit `.env`.** It's already gitignored.
+
+### Depositing testnet USDC
+
+The Dashboard's "Deposit USDC" button calls Circle's faucet API
+(`POST /v1/faucet/drips`) directly, so creators can request real testnet USDC
+without leaving the app — no need to copy an address into a separate faucet
+site. Requires `CIRCLE_API_KEY`; without it, the button explains it's in demo
+mode instead of pretending to succeed. Circle caps this at **20 USDC per
+request, once per wallet per blockchain every 2 hours** — a repeat request
+within that window returns a clear "try again later" message rather than a
+generic error. The wallet card also has a copy-address button and a link to
+faucet.circle.com as a manual fallback (e.g. for EURC or if you've hit the
+rate limit).
 
 ### Provisioning the 5 seed agents (wallets + onchain identity)
 

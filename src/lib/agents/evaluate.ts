@@ -23,7 +23,7 @@ export async function evaluateOutput(params: {
   const client = await getAnthropic();
   const rubricCriteria = ["prompt-alignment", "brand-consistency", "quality", "originality"];
 
-  if (!client) {
+  function demoEvaluation(note: string): EvaluationResult {
     const radar = Object.fromEntries(
       rubricCriteria.map((c) => [c, 70 + Math.floor(Math.random() * 25)])
     );
@@ -34,26 +34,42 @@ export async function evaluateOutput(params: {
       score,
       passed: score >= 65,
       radar,
-      feedback: "(demo evaluation) Set ANTHROPIC_API_KEY for real LLM-as-judge scoring.",
+      feedback: note,
       failureType: score >= 65 ? "none" : (params.modality as EvaluationFailureType),
     };
   }
 
-  const msg = await client.messages.create({
-    model: "claude-sonnet-4-5",
-    max_tokens: 500,
-    system:
-      'You are an LLM-as-judge for generated content. Score the output 0-100 against the original prompt on these criteria: prompt-alignment, brand-consistency, quality, originality. Reply ONLY as JSON: {"scores": {"prompt-alignment": n, "brand-consistency": n, "quality": n, "originality": n}, "feedback": "one sentence", "failureType": "none|text|image|video|audio|brand-mismatch"}',
-    messages: [
-      {
-        role: "user",
-        content: `Modality: ${params.modality}\nPrompt: ${params.prompt}\nOutput: ${params.output}`,
-      },
-    ],
-  });
+  if (!client) {
+    return demoEvaluation("(demo evaluation) Set ANTHROPIC_API_KEY for real LLM-as-judge scoring.");
+  }
 
-  const block = msg.content.find((c) => c.type === "text");
-  const raw = block && block.type === "text" ? block.text : "{}";
+  let raw: string;
+  try {
+    const msg = await client.messages.create({
+      model: "claude-sonnet-4-5",
+      max_tokens: 500,
+      system:
+        'You are an LLM-as-judge for generated content. Score the output 0-100 against the original prompt on these criteria: prompt-alignment, brand-consistency, quality, originality. Reply ONLY as JSON: {"scores": {"prompt-alignment": n, "brand-consistency": n, "quality": n, "originality": n}, "feedback": "one sentence", "failureType": "none|text|image|video|audio|brand-mismatch"}',
+      messages: [
+        {
+          role: "user",
+          content: `Modality: ${params.modality}\nPrompt: ${params.prompt}\nOutput: ${params.output}`,
+        },
+      ],
+    });
+    const block = msg.content.find((c) => c.type === "text");
+    raw = block && block.type === "text" ? block.text : "{}";
+  } catch (err) {
+    // Same reasoning as text.ts: a billing/quota failure on Anthropic's side
+    // (e.g. a 400 "credit balance too low") should degrade this one
+    // evaluation to demo scoring, not fail the entire content-generation
+    // request the evaluation was attached to.
+    return demoEvaluation(
+      `(demo evaluation) Real LLM-as-judge call failed, used demo scoring instead: ${
+        err instanceof Error ? err.message : "unknown error"
+      }`
+    );
+  }
 
   try {
     const jsonMatch = raw.match(/\{[\s\S]*\}/);

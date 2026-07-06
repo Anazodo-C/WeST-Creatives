@@ -45,34 +45,43 @@ export async function generateImage(
     .filter(Boolean)
     .join(". ");
 
+  const placeholder = () => ({
+    url: `data:image/svg+xml;utf8,${encodeURIComponent(placeholderSvg(attributes.subject))}`,
+    description: compiledPrompt,
+    demo: true,
+  });
+
   if (!GOOGLE_API_KEY) {
-    return {
-      url: `data:image/svg+xml;utf8,${encodeURIComponent(
-        placeholderSvg(attributes.subject)
-      )}`,
-      description: compiledPrompt,
-      demo: true,
-    };
+    return placeholder();
   }
 
-  const { GoogleGenerativeAI } = await import("@google/generative-ai");
-  const genAI = new GoogleGenerativeAI(GOOGLE_API_KEY);
-  // Imagen generation via Gemini API — model name per Google's current image
-  // generation offering (imagen-3 / gemini image-preview family).
-  const model = genAI.getGenerativeModel({ model: "imagen-3.0-generate-002" });
-  const result = await model.generateContent(compiledPrompt);
-  const response = result.response;
-  const inlineData = response.candidates?.[0]?.content?.parts?.find(
-    (p) => "inlineData" in p
-  );
-  const base64 = (inlineData as { inlineData?: { data?: string } } | undefined)
-    ?.inlineData?.data;
+  try {
+    const { GoogleGenerativeAI } = await import("@google/generative-ai");
+    const genAI = new GoogleGenerativeAI(GOOGLE_API_KEY);
+    // Imagen generation via Gemini API — model name per Google's current image
+    // generation offering (imagen-3 / gemini image-preview family).
+    const model = genAI.getGenerativeModel({ model: "imagen-3.0-generate-002" });
+    const result = await model.generateContent(compiledPrompt);
+    const response = result.response;
+    const inlineData = response.candidates?.[0]?.content?.parts?.find(
+      (p) => "inlineData" in p
+    );
+    const base64 = (inlineData as { inlineData?: { data?: string } } | undefined)
+      ?.inlineData?.data;
 
-  return {
-    url: base64 ? `data:image/png;base64,${base64}` : "",
-    description: compiledPrompt,
-    demo: false,
-  };
+    if (!base64) return placeholder();
+
+    return {
+      url: `data:image/png;base64,${base64}`,
+      description: compiledPrompt,
+      demo: false,
+    };
+  } catch {
+    // Common causes: expired/invalid key, quota/billing exhausted, or the
+    // model name not yet enabled on this Google Cloud project — fall back to
+    // the placeholder instead of failing the whole generation request.
+    return placeholder();
+  }
 }
 
 function placeholderSvg(label: string) {

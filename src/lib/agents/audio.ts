@@ -20,29 +20,39 @@ export async function generateAudio(
     return { url: "", script, demo: true };
   }
 
-  const res = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`,
-    {
-      method: "POST",
-      headers: {
-        "xi-api-key": ELEVENLABS_API_KEY,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        text: script,
-        model_id: "eleven_multilingual_v2",
-      }),
+  try {
+    const res = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`,
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key": ELEVENLABS_API_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: script,
+          model_id: "eleven_multilingual_v2",
+        }),
+      }
+    );
+
+    if (!res.ok) {
+      return { url: "", script: `${script}\n\n(ElevenLabs error ${res.status})`, demo: true };
     }
-  );
 
-  if (!res.ok) {
-    return { url: "", script: `${script}\n\n(ElevenLabs error ${res.status})`, demo: true };
+    const buf = Buffer.from(await res.arrayBuffer());
+    return {
+      url: `data:audio/mpeg;base64,${buf.toString("base64")}`,
+      script,
+      demo: false,
+    };
+  } catch (err) {
+    // Network-level failure (DNS, timeout, etc.) rather than an HTTP error
+    // status — same fallback either way.
+    return {
+      url: "",
+      script: `${script}\n\n(ElevenLabs unavailable: ${err instanceof Error ? err.message : "unknown error"})`,
+      demo: true,
+    };
   }
-
-  const buf = Buffer.from(await res.arrayBuffer());
-  return {
-    url: `data:audio/mpeg;base64,${buf.toString("base64")}`,
-    script,
-    demo: false,
-  };
 }

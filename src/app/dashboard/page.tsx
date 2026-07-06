@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useAccount } from "wagmi";
-import { ExternalLink, Wallet, Sparkles, Loader2 } from "lucide-react";
+import { ExternalLink, Wallet, Sparkles, Loader2, Copy, Check } from "lucide-react";
 import type { ContentRecord } from "@/lib/types";
 
 export default function DashboardPage() {
@@ -26,6 +26,9 @@ export default function DashboardPage() {
   });
   const [generating, setGenerating] = useState(false);
   const [lastResult, setLastResult] = useState<ContentRecord | null>(null);
+  const [depositing, setDepositing] = useState(false);
+  const [depositMessage, setDepositMessage] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     let oid = localStorage.getItem("vibe.ownerId");
@@ -45,8 +48,53 @@ export default function DashboardPage() {
       fetch(`/api/content/history?creatorId=${encodeURIComponent(oid)}`)
         .then((res) => res.json())
         .then((d) => setHistory(d.records ?? []));
+
+      // Get-or-create this owner's wallet so the address actually shows up
+      // instead of the permanent "appears after your first..." placeholder —
+      // idempotent, same call signup already makes, safe to repeat here.
+      fetch("/api/wallets/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ownerId: oid, label: oid }),
+      })
+        .then((res) => res.json())
+        .then((d) => {
+          if (d.address) setWalletAddress(d.address);
+        })
+        .catch(() => {
+          // Non-critical — the wallet card just keeps showing the placeholder.
+        });
     }
   }, [session?.user?.email]);
+
+  async function handleDeposit() {
+    if (!ownerId) return;
+    setDepositing(true);
+    setDepositMessage(null);
+    try {
+      const res = await fetch("/api/wallets/faucet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ownerId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Faucet request failed.");
+      if (data.address) setWalletAddress(data.address);
+      setDepositMessage(data.message ?? "Request sent.");
+    } catch (err) {
+      setDepositMessage(err instanceof Error ? err.message : "Faucet request failed.");
+    } finally {
+      setDepositing(false);
+    }
+  }
+
+  function handleCopyAddress() {
+    if (!walletAddress) return;
+    navigator.clipboard.writeText(walletAddress).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
 
   // If this session's identity came from a wallet and that wallet is later
   // disconnected, drop it from local storage/state so the dashboard reflects
@@ -131,25 +179,41 @@ export default function DashboardPage() {
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Wallet size={16} className="text-neon" /> Wallet
           </div>
-          <div className="mt-3 truncate rounded-lg bg-background px-3 py-2 font-mono text-xs text-muted">
-            {walletAddress || "Wallet address appears after your first deposit or generation"}
+          <div className="mt-3 flex items-center gap-2 rounded-lg bg-background px-3 py-2">
+            <span className="truncate font-mono text-xs text-muted">
+              {walletAddress || "Provisioning your wallet…"}
+            </span>
+            {walletAddress && (
+              <button
+                onClick={handleCopyAddress}
+                title="Copy address"
+                className="shrink-0 text-muted hover:text-neon"
+              >
+                {copied ? <Check size={12} /> : <Copy size={12} />}
+              </button>
+            )}
           </div>
-          <div className="mt-4 flex gap-3">
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              onClick={handleDeposit}
+              disabled={depositing || !walletAddress}
+              className="flex items-center gap-2 rounded-full bg-neon px-4 py-2 text-xs font-semibold text-black disabled:opacity-50"
+            >
+              {depositing && <Loader2 size={12} className="animate-spin" />}
+              {depositing ? "Requesting..." : "Deposit USDC"}
+            </button>
             <a
-              href="https://developers.circle.com/wallets/developer-console-faucet"
+              href="https://faucet.circle.com"
               target="_blank"
               rel="noreferrer"
               className="flex items-center gap-1 rounded-full border border-border-subtle px-4 py-2 text-xs hover:border-neon-dim"
             >
-              Testnet faucet <ExternalLink size={12} />
+              Faucet website <ExternalLink size={12} />
             </a>
-            <button
-              onClick={() => alert("Gateway deposit flow — wire your CIRCLE_API_KEY to enable live deposits.")}
-              className="rounded-full bg-neon px-4 py-2 text-xs font-semibold text-black"
-            >
-              Deposit USDC
-            </button>
           </div>
+          {depositMessage && (
+            <p className="mt-2 text-xs text-muted">{depositMessage}</p>
+          )}
         </div>
 
         <div className="neon-border rounded-2xl bg-surface p-5">

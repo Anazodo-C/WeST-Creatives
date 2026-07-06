@@ -167,6 +167,69 @@ export async function settlePaymentSplit(params: {
   }
 }
 
+export interface FaucetDripResult {
+  demo: boolean;
+  message: string;
+}
+
+/**
+ * Request testnet USDC directly to a wallet from inside the app, via
+ * Circle's faucet API (POST /v1/faucet/drips) — the same backend as the
+ * public faucet.circle.com UI, but callable from our own "Deposit USDC"
+ * button instead of sending creators to an external site. Drips 20 USDC per
+ * call; Circle caps this at one request per address per blockchain every 2
+ * hours (see https://faucet.circle.com), which is why a 429/"already
+ * requested"-style response is translated into a clear message instead of a
+ * generic error. Never throws.
+ */
+export async function requestFaucetDrip(address: string): Promise<FaucetDripResult> {
+  if (CIRCLE_DEMO_MODE) {
+    return {
+      demo: true,
+      message:
+        "Demo mode — set CIRCLE_API_KEY to request real testnet USDC. Once set, this drips 20 USDC straight to your wallet via Circle's faucet.",
+    };
+  }
+
+  try {
+    const res = await fetch("https://api.circle.com/v1/faucet/drips", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${CIRCLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        blockchain: "ARC-TESTNET",
+        address,
+        usdc: true,
+        native: false,
+      }),
+    });
+
+    if (res.ok) {
+      return {
+        demo: false,
+        message: "20 USDC requested — it should land in your wallet within a minute or two.",
+      };
+    }
+
+    const body = (await res.json().catch(() => ({}))) as { message?: string };
+    const rawMessage = body.message || `Faucet request failed (${res.status}).`;
+    const isRateLimited = res.status === 429 || /rate|limit|already|too many/i.test(rawMessage);
+    return {
+      demo: true,
+      message: isRateLimited
+        ? "You've already requested testnet USDC recently — Circle's faucet allows one request per wallet every 2 hours. Try again later."
+        : rawMessage,
+    };
+  } catch (err) {
+    return {
+      demo: true,
+      message: err instanceof Error ? `Faucet request failed: ${err.message}` : "Faucet request failed.",
+    };
+  }
+}
+
 export interface ContractCallResult {
   txHash?: string;
   demo: boolean;

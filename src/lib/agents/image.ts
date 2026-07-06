@@ -42,7 +42,7 @@ const OPENROUTER_IMAGE_MODEL = process.env.OPENROUTER_IMAGE_MODEL || "black-fore
 // cheap (~$0.04/image) but a different provider/architecture entirely, so a
 // transient outage or rejection on one rarely hits both at once.
 const OPENROUTER_FALLBACK_IMAGE_MODEL =
-  process.env.OPENROUTER_FALLBACK_IMAGE_MODEL || "bytedance/seedream-4.5";
+  process.env.OPENROUTER_FALLBACK_IMAGE_MODEL || "bytedance-seed/seedream-4.5";
 
 interface ImagePromptAttributes {
   subject: string;

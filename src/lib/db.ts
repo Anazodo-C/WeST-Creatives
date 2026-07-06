@@ -90,6 +90,12 @@ const SCHEMA_SQL = `
     -- back to a demo placeholder — see ContentRecord.generationWarning in
     -- src/lib/types.ts.
     generationWarning TEXT,
+    -- Async video-job tracking (src/lib/agents/video.ts submitVideoJob +
+    -- src/app/api/content/video-status/route.ts) — NULL for every
+    -- non-video record, and for video generated in demo mode.
+    videoJobId TEXT,
+    videoPollingUrl TEXT,
+    videoStatus TEXT,
     createdAt TEXT NOT NULL
   );
 
@@ -190,6 +196,11 @@ async function initPostgres(connectionString: string): Promise<DbClient> {
   await pool
     .query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS generationWarning TEXT")
     .catch(() => {});
+  await pool.query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS videoJobId TEXT").catch(() => {});
+  await pool
+    .query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS videoPollingUrl TEXT")
+    .catch(() => {});
+  await pool.query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS videoStatus TEXT").catch(() => {});
 
   const client: DbClient = {
     async get(sql, params = []) {
@@ -238,6 +249,21 @@ async function initSqlite(): Promise<DbClient> {
   }
   try {
     db.exec("ALTER TABLE content_records ADD COLUMN generationWarning TEXT");
+  } catch {
+    // already exists — fine
+  }
+  try {
+    db.exec("ALTER TABLE content_records ADD COLUMN videoJobId TEXT");
+  } catch {
+    // already exists — fine
+  }
+  try {
+    db.exec("ALTER TABLE content_records ADD COLUMN videoPollingUrl TEXT");
+  } catch {
+    // already exists — fine
+  }
+  try {
+    db.exec("ALTER TABLE content_records ADD COLUMN videoStatus TEXT");
   } catch {
     // already exists — fine
   }

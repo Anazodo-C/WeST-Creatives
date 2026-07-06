@@ -89,6 +89,18 @@ export interface ContentRecord {
   // the UI explain *why* the output is a placeholder instead of leaving it
   // unexplained.
   generationWarning?: string;
+  // Set only for video content whose real render was submitted as an async
+  // OpenRouter job (src/lib/agents/video.ts submitVideoJob) rather than
+  // completed inline. "pending" until src/app/api/content/video-status's
+  // polling flips it to "completed" (output becomes the real video URL) or
+  // "failed" (output stays the storyboard text). Undefined for every other
+  // modality, and for video generated in demo mode (no OPENROUTER_API_KEY).
+  videoStatus?: "pending" | "completed" | "failed";
+  videoJobId?: string;
+  // Server-internal only — route.ts strips this before returning JSON to
+  // the client. Needed so /api/content/video-status knows which OpenRouter
+  // job to poll for a given content record id.
+  videoPollingUrl?: string;
   createdAt: string;
 }
 

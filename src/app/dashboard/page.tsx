@@ -170,6 +170,44 @@ export default function DashboardPage() {
     if (walletAddress) fetchBalance(walletAddress);
   }, [walletAddress]);
 
+  // Video generation is an async OpenRouter job (see src/lib/agents/video.ts)
+  // that takes minutes to render, so a video record comes back from
+  // /api/content/generate with videoStatus "pending" and a storyboard
+  // placeholder as its output. Poll every ~8s for any record (in history or
+  // the last-result panel) still in that state, and swap in the real video
+  // URL once /api/content/video-status reports it's done. Recomputing
+  // pendingIds from current state on every render means this also picks up
+  // jobs that were already pending when the page loaded (e.g. a refresh
+  // mid-render), not just ones submitted in this session.
+  useEffect(() => {
+    const pendingIds = new Set<string>();
+    if (lastResult?.videoStatus === "pending") pendingIds.add(lastResult.id);
+    for (const r of history) {
+      if (r.videoStatus === "pending") pendingIds.add(r.id);
+    }
+    if (pendingIds.size === 0) return;
+
+    const interval = setInterval(async () => {
+      for (const id of pendingIds) {
+        try {
+          const res = await fetch(`/api/content/video-status?id=${encodeURIComponent(id)}`);
+          if (!res.ok) continue;
+          const update = (await res.json()) as {
+            videoStatus?: ContentRecord["videoStatus"];
+            output?: string;
+            generationWarning?: string;
+          };
+          setHistory((h) => h.map((r) => (r.id === id ? { ...r, ...update } : r)));
+          setLastResult((lr) => (lr && lr.id === id ? { ...lr, ...update } : lr));
+        } catch {
+          // Transient network hiccup — next ~8s interval tries again.
+        }
+      }
+    }, 8000);
+
+    return () => clearInterval(interval);
+  }, [lastResult?.id, lastResult?.videoStatus, history]);
+
   function handleCopyAddress() {
     if (!walletAddress) return;
     navigator.clipboard.writeText(walletAddress).then(() => {
@@ -402,6 +440,12 @@ export default function DashboardPage() {
             <div className="mt-4 rounded-xl border border-neon-dim bg-neon/5 p-4 text-sm">
               <div className="text-muted">Evaluation score</div>
               <div className="text-2xl font-bold text-neon">{lastResult.evaluation.score}/100</div>
+              {lastResult.videoStatus === "pending" && (
+                <p className="mt-2 flex items-center gap-2 rounded-lg border border-neon-dim/40 bg-neon/5 p-2 text-xs text-muted">
+                  <Loader2 size={12} className="animate-spin" /> Video is rendering — usually a few minutes, this
+                  updates automatically.
+                </p>
+              )}
               {lastResult.generationWarning && (
                 <p className="mt-2 rounded-lg border border-yellow-600/40 bg-yellow-500/10 p-2 text-xs text-yellow-500">
                   {lastResult.generationWarning}
@@ -430,7 +474,15 @@ export default function DashboardPage() {
                 </div>
                 <p className="mt-1 line-clamp-2 text-sm">{r.prompt}</p>
                 <div className="mt-1 flex items-center justify-between">
-                  <span className="text-xs text-neon">score {r.evaluation?.score ?? "-"}</span>
+                  <span className="text-xs text-neon">
+                    {r.videoStatus === "pending" ? (
+                      <span className="inline-flex items-center gap-1 text-muted">
+                        <Loader2 size={10} className="animate-spin" /> rendering
+                      </span>
+                    ) : (
+                      `score ${r.evaluation?.score ?? "-"}`
+                    )}
+                  </span>
                   <button
                     onClick={() => setExpandedId(expandedId === r.id ? null : r.id)}
                     className="text-xs text-muted underline hover:text-neon"

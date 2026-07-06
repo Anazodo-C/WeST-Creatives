@@ -56,8 +56,7 @@ The SQLite file is created automatically at `.data/vibe.db` on first request.
 | Circle API key + Entity Secret | console.circle.com → Keys, and Wallets → Entity Secret registration |
 | Arc Testnet USDC (for real transactions) | developers.circle.com/wallets/developer-console-faucet |
 | Anthropic key | console.anthropic.com |
-| OpenRouter key (image generation) | openrouter.ai/keys — add prepaid credits at openrouter.ai/credits ($5-10 to start; default model ~$0.014-0.03/image, see `.env.example`) |
-| Google API key (Veo video, not yet wired) | aistudio.google.com/apikey |
+| OpenRouter key (image + video generation) | openrouter.ai/keys — add prepaid credits at openrouter.ai/credits ($5-10 to start; default image model ~$0.014-0.03/image, default video model ~$0.02/s, see `.env.example`) |
 | ElevenLabs key | elevenlabs.io |
 | Resend key (contact form email) | resend.com |
 | WalletConnect project id (optional) | cloud.reown.com |
@@ -306,9 +305,15 @@ the next slice of work.
 
 ## What's intentionally simplified for the hackathon cut
 
-- Video/audio generation return a storyboard/script in demo mode rather than
-  a rendered file — real generation wires in the moment `GOOGLE_API_KEY` /
-  `ELEVENLABS_API_KEY` are set, but full multi-scene stitching and retries are
+- Audio generation returns a script in demo mode rather than a rendered file
+  — real generation wires in the moment `ELEVENLABS_API_KEY` is set.
+- Video generation is real (OpenRouter's async video API, see `.env.example`
+  and `src/lib/agents/video.ts`), but since jobs take minutes to render, the
+  content record comes back with a storyboard placeholder and `videoStatus:
+  "pending"` — `src/app/api/content/video-status` is polled by the dashboard
+  every ~8s until the job resolves, at which point the placeholder is
+  replaced with the real video URL. Multi-scene stitching (right now each
+  scene is planned but only the combined prompt is rendered as one clip) is
   a fast-follow, not MVP.
 - SigLIP-style embedding similarity scoring is noted in `evaluate.ts` but not
   implemented — LLM-as-judge + rubric scoring covers evaluation for now.

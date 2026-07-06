@@ -117,8 +117,8 @@ export async function POST(req: NextRequest) {
     }
 
     await db.run(
-      `INSERT INTO content_records (id, creatorId, agentId, modality, prompt, enhancedPrompt, output, evaluationJson, costUsdc, developerShareUsdc, platformShareUsdc, reputationTxHash, reputationWarning, generationWarning, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO content_records (id, creatorId, agentId, modality, prompt, enhancedPrompt, output, evaluationJson, costUsdc, developerShareUsdc, platformShareUsdc, reputationTxHash, reputationWarning, generationWarning, videoJobId, videoPollingUrl, videoStatus, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         record.id,
         record.creatorId,
@@ -134,6 +134,9 @@ export async function POST(req: NextRequest) {
         reputationTxHash ?? null,
         reputationWarning ?? null,
         record.generationWarning ?? null,
+        record.videoJobId ?? null,
+        record.videoPollingUrl ?? null,
+        record.videoStatus ?? null,
         record.createdAt,
       ]
     );
@@ -167,8 +170,13 @@ export async function POST(req: NextRequest) {
       agentRow.id,
     ]);
 
+    // videoPollingUrl is server-internal (see ContentRecord.videoPollingUrl
+    // in src/lib/types.ts) — /api/content/video-status looks it up from the
+    // DB by record id, the client never needs or should see it directly.
+    const { videoPollingUrl: _videoPollingUrl, ...clientRecord } = record;
+
     return NextResponse.json({
-      ...record,
+      ...clientRecord,
       developerShareUsdc: developerShare,
       platformShareUsdc: platformShare,
       settlementDemo: settlement.demo,

@@ -6,6 +6,7 @@
  * model) rather than included in this MVP.
  */
 import type { EvaluationResult, EvaluationFailureType } from "@/lib/types";
+import { cleanErrorMessage } from "@/lib/agents/text";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
@@ -65,9 +66,7 @@ export async function evaluateOutput(params: {
     // evaluation to demo scoring, not fail the entire content-generation
     // request the evaluation was attached to.
     return demoEvaluation(
-      `(demo evaluation) Real LLM-as-judge call failed, used demo scoring instead: ${
-        err instanceof Error ? err.message : "unknown error"
-      }`
+      `(demo evaluation) Real LLM-as-judge call failed, used demo scoring instead: ${cleanErrorMessage(err)}`
     );
   }
 

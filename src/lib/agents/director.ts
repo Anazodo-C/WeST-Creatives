@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import type { ContentRequest, ContentRecord } from "@/lib/types";
 import { enhancePrompt, generateText } from "@/lib/agents/text";
 import { buildImageAttributes, generateImage } from "@/lib/agents/image";
-import { planScenes, generateVideo } from "@/lib/agents/video";
+import { planScenes, submitVideoJob } from "@/lib/agents/video";
 import { generateAudio } from "@/lib/agents/audio";
 import { evaluateOutput } from "@/lib/agents/evaluate";
 import { AGENT_PRICE_USDC } from "@/lib/pricing";
@@ -28,6 +28,9 @@ export async function runDirector(
 
   let output = "";
   let generationWarning: string | undefined;
+  let videoStatus: "pending" | "completed" | "failed" | undefined;
+  let videoJobId: string | undefined;
+  let videoPollingUrl: string | undefined;
   if (request.modality === "text") {
     output = await generateText(enhancedPrompt, request.brand);
   } else if (request.modality === "image") {
@@ -36,9 +39,17 @@ export async function runDirector(
     output = img.url || img.description;
     generationWarning = img.warning;
   } else if (request.modality === "video") {
+    // Video is submitted as an async job and never awaited to completion
+    // here — see the module comment in video.ts. `output` starts as the
+    // storyboard placeholder text; /api/content/video-status polling swaps
+    // it for the real rendered URL once the job finishes.
     const scenes = planScenes(enhancedPrompt);
-    const vid = await generateVideo(scenes, request.brand);
-    output = vid.url || vid.storyboard;
+    const vid = await submitVideoJob(scenes, request.brand);
+    output = vid.storyboard;
+    generationWarning = vid.warning;
+    videoJobId = vid.jobId;
+    videoPollingUrl = vid.pollingUrl;
+    videoStatus = vid.jobId ? "pending" : undefined;
   } else {
     const audio = await generateAudio(enhancedPrompt, request.brand);
     output = audio.url || audio.script;
@@ -61,6 +72,9 @@ export async function runDirector(
     evaluation,
     costUsdc: cost,
     generationWarning,
+    videoStatus,
+    videoJobId,
+    videoPollingUrl,
     createdAt: new Date().toISOString(),
   };
 }

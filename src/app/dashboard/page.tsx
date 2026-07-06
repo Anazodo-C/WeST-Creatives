@@ -214,8 +214,24 @@ export default function DashboardPage() {
           },
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "generation failed");
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        // data.error is usually a string, but a failed zod validation
+        // (src/app/api/content/generate/route.ts's bodySchema) returns
+        // error.flatten()'s object shape instead — stringifying that with
+        // `new Error(obj)` produced an unhelpful "[object Object]" alert.
+        // Extract the real per-field messages when it's an object.
+        const message =
+          typeof data?.error === "string"
+            ? data.error
+            : data?.error?.fieldErrors
+              ? Object.entries(data.error.fieldErrors as Record<string, string[]>)
+                  .filter(([, msgs]) => msgs?.length)
+                  .map(([field, msgs]) => `${field}: ${msgs.join(", ")}`)
+                  .join("; ") || "Invalid request."
+              : `Request failed (${res.status}).`;
+        throw new Error(message);
+      }
       setLastResult(data);
       setHistory((h) => [data, ...h]);
     } catch (err) {

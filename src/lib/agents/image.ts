@@ -33,6 +33,16 @@ import type { BrandProfile } from "@/lib/types";
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_IMAGE_MODEL = process.env.OPENROUTER_IMAGE_MODEL || "black-forest-labs/flux.2-klein-4b";
+// Tried once more, on a different model+provider, if the primary model
+// errors out or gets a bad prompt-adherence result — flux.2-klein-4b is
+// OpenRouter's *cheapest* image model (its own docs describe it as
+// optimized for speed/cost over fidelity), which explains both failure
+// modes reported in practice: occasional provider-side errors, and images
+// that don't closely match the prompt. Seedream 4.5 is still nanopayment-
+// cheap (~$0.04/image) but a different provider/architecture entirely, so a
+// transient outage or rejection on one rarely hits both at once.
+const OPENROUTER_FALLBACK_IMAGE_MODEL =
+  process.env.OPENROUTER_FALLBACK_IMAGE_MODEL || "bytedance/seedream-4.5";
 
 interface ImagePromptAttributes {
   subject: string;
@@ -83,6 +93,31 @@ export async function generateImage(
     return placeholder();
   }
 
+  // Try the primary (cheapest) model first, then one fallback on a
+  // different model/provider if that fails — a single transient
+  // provider-side error (or a persistently low-fidelity result from the
+  // cheap model) shouldn't be the end of the attempt.
+  const attempts = [OPENROUTER_IMAGE_MODEL, OPENROUTER_FALLBACK_IMAGE_MODEL].filter(
+    (m, i, arr) => arr.indexOf(m) === i
+  );
+
+  let lastWarning = "";
+  for (const model of attempts) {
+    const result = await callOpenRouterImage(model, compiledPrompt);
+    if (result.url) {
+      return { url: result.url, description: compiledPrompt, demo: false };
+    }
+    lastWarning = result.warning;
+    console.error(`[generateImage] ${model} failed:`, result.warning);
+  }
+
+  return placeholder(`OpenRouter image generation failed, used a placeholder instead: ${lastWarning}`);
+}
+
+async function callOpenRouterImage(
+  model: string,
+  compiledPrompt: string
+): Promise<{ url?: string; warning: string }> {
   try {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -96,7 +131,7 @@ export async function generateImage(
         "X-Title": "West Creatives",
       },
       body: JSON.stringify({
-        model: OPENROUTER_IMAGE_MODEL,
+        model,
         messages: [{ role: "user", content: compiledPrompt }],
         // Pure image-output models (FLUX, Seedream, Riverflow — including
         // this app's default, flux.2-klein-4b) only ever support
@@ -120,9 +155,29 @@ export async function generateImage(
     const json = await res.json().catch(() => null);
 
     if (!res.ok) {
-      const detail = json?.error?.message || `HTTP ${res.status}`;
-      console.error("[generateImage] OpenRouter call failed:", detail);
-      return placeholder(`OpenRouter image generation failed, used a placeholder instead: ${detail}`);
+      // OpenRouter's own top-level `error.message` is often a generic
+      // wrapper (e.g. "Provider returned error") for failures that
+      // actually originated with the underlying provider (FLUX/BFL,
+      // Seedream, etc). The real detail — if OpenRouter captured one — is
+      // nested under error.metadata: `raw` (the provider's own raw error
+      // body/string), `provider_name`, `provider_code`, or `error_type`.
+      // Surface whichever of those is present instead of the generic text.
+      const errObj = json?.error as
+        | { message?: string; metadata?: { raw?: unknown; provider_name?: string; provider_code?: string; error_type?: string } }
+        | undefined;
+      const metadata = errObj?.metadata;
+      const rawDetail =
+        typeof metadata?.raw === "string"
+          ? metadata.raw
+          : metadata?.raw
+            ? JSON.stringify(metadata.raw)
+            : undefined;
+      const detail =
+        rawDetail ||
+        [metadata?.provider_name, metadata?.provider_code, metadata?.error_type].filter(Boolean).join(" ") ||
+        errObj?.message ||
+        `HTTP ${res.status}`;
+      return { warning: `model ${model}: ${detail}` };
     }
 
     const images = json?.choices?.[0]?.message?.images as { image_url?: { url?: string } }[] | undefined;
@@ -135,20 +190,14 @@ export async function generateImage(
       // diagnosable instead of a silent, unexplained placeholder.
       const textContent = json?.choices?.[0]?.message?.content;
       const reason =
-        typeof textContent === "string" && textContent ? textContent.slice(0, 200) : "Model returned no image data.";
-      console.error("[generateImage] no images in OpenRouter response:", reason);
-      return placeholder(`OpenRouter returned no image: ${reason}`);
+        typeof textContent === "string" && textContent ? textContent.slice(0, 200) : "model returned no image data.";
+      return { warning: `model ${model}: no image returned — ${reason}` };
     }
 
-    return {
-      url, // already a data:image/...;base64,... URL per OpenRouter's response format
-      description: compiledPrompt,
-      demo: false,
-    };
+    return { url, warning: "" };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    console.error("[generateImage] OpenRouter call failed:", message);
-    return placeholder(`OpenRouter image generation failed, used a placeholder instead: ${message}`);
+    return { warning: `model ${model}: ${message}` };
   }
 }
 

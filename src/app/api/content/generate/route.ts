@@ -35,17 +35,33 @@ export async function POST(req: NextRequest) {
   }
 
   const { agentId, ...request }: ContentRequest & { agentId?: string } = parsed.data;
-  const db = await getDb();
 
-  const agentRow = agentId
-    ? await db.get<{ id: string; walletAddress: string | null; onchainAgentId: string | null }>(
-        "SELECT * FROM agents WHERE id = ?",
-        [agentId]
-      )
-    : await db.get<{ id: string; walletAddress: string | null; onchainAgentId: string | null }>(
-        "SELECT * FROM agents WHERE type = ? ORDER BY score DESC LIMIT 1",
-        [request.modality]
-      );
+  let agentRow: { id: string; walletAddress: string | null; onchainAgentId: string | null } | undefined;
+  try {
+    const db = await getDb();
+    agentRow = agentId
+      ? await db.get<{ id: string; walletAddress: string | null; onchainAgentId: string | null }>(
+          "SELECT * FROM agents WHERE id = ?",
+          [agentId]
+        )
+      : await db.get<{ id: string; walletAddress: string | null; onchainAgentId: string | null }>(
+          "SELECT * FROM agents WHERE type = ? ORDER BY score DESC LIMIT 1",
+          [request.modality]
+        );
+  } catch (err) {
+    // A DB-layer failure here (bad DATABASE_URL, connection refused, schema
+    // drift on a not-yet-migrated Postgres instance, etc.) previously threw
+    // uncaught before the outer try/catch even started, so Next.js returned
+    // its own HTML 500 page instead of JSON — the client's res.json() call
+    // then threw its own opaque "Unexpected token <" parse error, which is
+    // indistinguishable from "generation just fails" in the UI. Surface the
+    // real cause instead.
+    console.error("[content/generate] agent lookup failed:", err);
+    return NextResponse.json(
+      { error: `Could not look up agent: ${err instanceof Error ? err.message : "database error"}` },
+      { status: 500 }
+    );
+  }
 
   if (!agentRow) {
     return NextResponse.json(
@@ -55,6 +71,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    const db = await getDb();
     const record = await runDirector(request, agentRow.id);
 
     const developerShare = +(record.costUsdc * 0.9).toFixed(6);
@@ -160,6 +177,13 @@ export async function POST(req: NextRequest) {
       reputationWarning,
     });
   } catch (err) {
+    // Log the full error server-side (visible in Vercel's function logs)
+    // even though the client only gets a short message — every sub-agent
+    // call in runDirector() already degrades to demo output on failure
+    // instead of throwing, so anything landing here is either the
+    // "Budget too low" guard in director.ts, a settlement/DB issue, or a
+    // genuine bug — worth having the stack trace for.
+    console.error("[content/generate] request failed:", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "generation failed" },
       { status: 500 }

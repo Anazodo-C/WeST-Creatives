@@ -7,7 +7,7 @@
  * mints an identity token, ownerOf/tokenURI read it back, and the Transfer
  * event tells you the minted agentId.
  */
-import { createPublicClient, http, getContract, parseAbiItem, type Address } from "viem";
+import { createPublicClient, http, getContract, parseAbiItem, formatEther, type Address } from "viem";
 import { arcTestnet } from "viem/chains";
 
 export const ERC8004_CONTRACTS = {
@@ -120,3 +120,19 @@ export async function findLatestAgentIdForOwner(ownerAddress: Address) {
 }
 
 export const ARC_DEMO_MODE = !process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET;
+
+/**
+ * Arc Testnet's native gas token *is* USDC (per viem's built-in arcTestnet
+ * chain definition: nativeCurrency = { name: "USDC", symbol: "USDC",
+ * decimals: 18 }) — so a wallet's USDC balance is just its native balance,
+ * no ERC-20 contract call needed. Returns a plain decimal string (e.g.
+ * "12.5"), formatted with formatEther since the chain uses the same
+ * 18-decimal convention as any other EVM native currency. Demo/fake
+ * addresses (no real key set) simply read back as "0" — this is a public,
+ * unauthenticated RPC read, so it works with or without Circle keys.
+ */
+export async function getNativeUsdcBalance(address: Address): Promise<string> {
+  const client = getArcPublicClient();
+  const balance = await client.getBalance({ address });
+  return formatEther(balance);
+}

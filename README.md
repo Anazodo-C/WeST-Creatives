@@ -15,7 +15,11 @@ Circle Gateway (x402). Built for the Canteen x Lepton Hackathon.
   `src/components/Web3Provider.tsx`), alongside Google sign-in via NextAuth.
 - **Content engine** — `src/lib/agents/` — director orchestrator + text/image/
   video/audio sub-agents + LLM-as-judge/rubric evaluation with per-modality
-  failure classification.
+  failure classification. The Dashboard renders the actual generated output
+  (not just its score) — inline image/audio/video preview plus a real
+  download link, or the full text with a download-as-.txt link — both for
+  the just-generated result and any past item in Content History
+  ("View / download").
 - **Payments & identity** — `src/lib/circle.ts` (wallets + nanopayment split),
   `src/lib/arc.ts` (ERC-8004 IdentityRegistry reads), `scripts/register-agent.ts`
   (onchain registration).
@@ -69,18 +73,22 @@ and put the project id in `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` in `.env`.
 
 **Never commit `.env`.** It's already gitignored.
 
-### Depositing testnet USDC
+### Wallet card: balance + getting testnet USDC
 
-The Dashboard's "Deposit USDC" button calls Circle's faucet API
-(`POST /v1/faucet/drips`) directly, so creators can request real testnet USDC
-without leaving the app — no need to copy an address into a separate faucet
-site. Requires `CIRCLE_API_KEY`; without it, the button explains it's in demo
-mode instead of pretending to succeed. Circle caps this at **20 USDC per
-request, once per wallet per blockchain every 2 hours** — a repeat request
-within that window returns a clear "try again later" message rather than a
-generic error. The wallet card also has a copy-address button and a link to
-faucet.circle.com as a manual fallback (e.g. for EURC or if you've hit the
-rate limit).
+The Dashboard's Wallet card shows the address (with a copy button) and its
+live USDC balance, read directly from Arc Testnet (`getNativeUsdcBalance` in
+`src/lib/arc.ts` — Arc's native gas token *is* USDC, so this is a plain,
+unauthenticated RPC balance read, no Circle keys needed) with a manual
+refresh button.
+
+"Get testnet USDC" links out to faucet.circle.com. There's also an in-app
+faucet call implemented (`requestFaucetDrip` in `src/lib/circle.ts`,
+`POST /v1/faucet/drips`, gated behind `CIRCLE_API_KEY`) but it's **not wired
+into the UI** — this project's API key gets a Forbidden response from that
+endpoint, likely a plan/permission tier issue Circle's docs don't spell out.
+The function and its route (`src/app/api/wallets/faucet/route.ts`) are still
+there; swap the external link back to a real in-app request once a key with
+faucet access confirms it actually works.
 
 ### Provisioning the 5 seed agents (wallets + onchain identity)
 

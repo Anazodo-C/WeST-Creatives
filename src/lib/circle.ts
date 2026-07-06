@@ -173,14 +173,21 @@ export interface FaucetDripResult {
 }
 
 /**
- * Request testnet USDC directly to a wallet from inside the app, via
- * Circle's faucet API (POST /v1/faucet/drips) — the same backend as the
- * public faucet.circle.com UI, but callable from our own "Deposit USDC"
- * button instead of sending creators to an external site. Drips 20 USDC per
- * call; Circle caps this at one request per address per blockchain every 2
- * hours (see https://faucet.circle.com), which is why a 429/"already
- * requested"-style response is translated into a clear message instead of a
- * generic error. Never throws.
+ * Request testnet USDC directly to a wallet via Circle's faucet API
+ * (POST /v1/faucet/drips) — the same backend as the public faucet.circle.com
+ * UI. Drips 20 USDC per call; Circle caps this at one request per address
+ * per blockchain every 2 hours (see https://faucet.circle.com), which is why
+ * a 429/"already requested"-style response is translated into a clear
+ * message instead of a generic error. Never throws.
+ *
+ * NOT currently wired into the dashboard UI: this endpoint returned
+ * Forbidden for this project's API key (likely a plan/permission tier that
+ * doesn't include programmatic faucet access — Circle's docs don't specify
+ * which tiers get it). The dashboard's "Get testnet USDC" button links to
+ * faucet.circle.com directly instead. Left here in case that changes —
+ * swap the external link for a call to /api/wallets/faucet (still present,
+ * see src/app/api/wallets/faucet/route.ts) once a key with faucet access
+ * confirms this works.
  */
 export async function requestFaucetDrip(address: string): Promise<FaucetDripResult> {
   if (CIRCLE_DEMO_MODE) {

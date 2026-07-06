@@ -3,8 +3,53 @@
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useAccount } from "wagmi";
-import { ExternalLink, Wallet, Sparkles, Loader2, Copy, Check } from "lucide-react";
+import { ExternalLink, Wallet, Sparkles, Loader2, Copy, Check, RefreshCw, Download } from "lucide-react";
 import type { ContentRecord } from "@/lib/types";
+
+/** Sniff a data: URI's media type so output can be previewed/downloaded correctly. */
+function outputMeta(output: string): { kind: "image" | "audio" | "video" | "text"; extension: string } {
+  const match = output.match(/^data:([a-z0-9]+)\/([a-z0-9.+-]+);base64,/i);
+  if (!match) return { kind: "text", extension: "txt" };
+  const [, type, subtype] = match;
+  const extension = subtype === "mpeg" ? "mp3" : subtype.split("+")[0] || "bin";
+  if (type === "image" || type === "audio" || type === "video") {
+    return { kind: type, extension };
+  }
+  return { kind: "text", extension: "txt" };
+}
+
+/** Renders generated content with an actual preview + a real download link — for
+ * data: URI outputs (image/audio/video) that used to just show
+ * "(binary output generated)" with no way to see or save them. */
+function OutputPreview({ output, filenameBase }: { output: string; filenameBase: string }) {
+  const meta = outputMeta(output);
+  const downloadHref = meta.kind === "text" ? `data:text/plain;charset=utf-8,${encodeURIComponent(output)}` : output;
+  const filename = `${filenameBase}.${meta.extension}`;
+
+  return (
+    <div className="mt-2 space-y-2">
+      {meta.kind === "image" && (
+        <img src={output} alt="Generated output" className="max-h-64 rounded-lg border border-border-subtle" />
+      )}
+      {meta.kind === "audio" && <audio controls src={output} className="w-full" />}
+      {meta.kind === "video" && (
+        <video controls src={output} className="max-h-64 w-full rounded-lg border border-border-subtle" />
+      )}
+      {meta.kind === "text" && (
+        <p className="max-h-64 overflow-y-auto whitespace-pre-wrap rounded-lg bg-background p-3 text-xs text-foreground">
+          {output}
+        </p>
+      )}
+      <a
+        href={downloadHref}
+        download={filename}
+        className="inline-flex items-center gap-1 text-xs text-neon hover:underline"
+      >
+        <Download size={12} /> Download {meta.kind === "text" ? "as .txt" : meta.kind}
+      </a>
+    </div>
+  );
+}
 
 export default function DashboardPage() {
   const { data: session } = useSession();
@@ -26,9 +71,10 @@ export default function DashboardPage() {
   });
   const [generating, setGenerating] = useState(false);
   const [lastResult, setLastResult] = useState<ContentRecord | null>(null);
-  const [depositing, setDepositing] = useState(false);
-  const [depositMessage, setDepositMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [balance, setBalance] = useState<string | null>(null);
+  const [balanceLoading, setBalanceLoading] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     let oid = localStorage.getItem("vibe.ownerId");
@@ -67,26 +113,22 @@ export default function DashboardPage() {
     }
   }, [session?.user?.email]);
 
-  async function handleDeposit() {
-    if (!ownerId) return;
-    setDepositing(true);
-    setDepositMessage(null);
+  async function fetchBalance(address: string) {
+    setBalanceLoading(true);
     try {
-      const res = await fetch("/api/wallets/faucet", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ownerId }),
-      });
+      const res = await fetch(`/api/wallets/balance?address=${encodeURIComponent(address)}`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Faucet request failed.");
-      if (data.address) setWalletAddress(data.address);
-      setDepositMessage(data.message ?? "Request sent.");
-    } catch (err) {
-      setDepositMessage(err instanceof Error ? err.message : "Faucet request failed.");
+      if (res.ok) setBalance(data.balance);
+    } catch {
+      // Non-critical — balance just stays unset, refresh button lets them retry.
     } finally {
-      setDepositing(false);
+      setBalanceLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (walletAddress) fetchBalance(walletAddress);
+  }, [walletAddress]);
 
   function handleCopyAddress() {
     if (!walletAddress) return;
@@ -193,27 +235,32 @@ export default function DashboardPage() {
               </button>
             )}
           </div>
+          <div className="mt-3 flex items-center gap-2 text-sm">
+            <span className="text-muted">Balance:</span>
+            <span className="font-semibold text-neon">
+              {balance !== null ? `${(+balance).toFixed(4)} USDC` : "—"}
+            </span>
+            {walletAddress && (
+              <button
+                onClick={() => fetchBalance(walletAddress)}
+                disabled={balanceLoading}
+                title="Refresh balance"
+                className="text-muted hover:text-neon disabled:opacity-50"
+              >
+                <RefreshCw size={12} className={balanceLoading ? "animate-spin" : ""} />
+              </button>
+            )}
+          </div>
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <button
-              onClick={handleDeposit}
-              disabled={depositing || !walletAddress}
-              className="flex items-center gap-2 rounded-full bg-neon px-4 py-2 text-xs font-semibold text-black disabled:opacity-50"
-            >
-              {depositing && <Loader2 size={12} className="animate-spin" />}
-              {depositing ? "Requesting..." : "Deposit USDC"}
-            </button>
             <a
               href="https://faucet.circle.com"
               target="_blank"
               rel="noreferrer"
-              className="flex items-center gap-1 rounded-full border border-border-subtle px-4 py-2 text-xs hover:border-neon-dim"
+              className="flex items-center gap-1 rounded-full bg-neon px-4 py-2 text-xs font-semibold text-black hover:opacity-90"
             >
-              Faucet website <ExternalLink size={12} />
+              Get testnet USDC <ExternalLink size={12} />
             </a>
           </div>
-          {depositMessage && (
-            <p className="mt-2 text-xs text-muted">{depositMessage}</p>
-          )}
         </div>
 
         <div className="neon-border rounded-2xl bg-surface p-5">
@@ -288,9 +335,7 @@ export default function DashboardPage() {
             <div className="mt-4 rounded-xl border border-neon-dim bg-neon/5 p-4 text-sm">
               <div className="text-muted">Evaluation score</div>
               <div className="text-2xl font-bold text-neon">{lastResult.evaluation.score}/100</div>
-              <p className="mt-2 whitespace-pre-wrap text-xs text-muted">
-                {lastResult.output.startsWith("data:") ? "(binary output generated)" : lastResult.output}
-              </p>
+              <OutputPreview output={lastResult.output} filenameBase={`west-creatives-${lastResult.id}`} />
             </div>
           )}
         </div>
@@ -308,7 +353,18 @@ export default function DashboardPage() {
                   <span>{r.costUsdc} USDC</span>
                 </div>
                 <p className="mt-1 line-clamp-2 text-sm">{r.prompt}</p>
-                <div className="mt-1 text-xs text-neon">score {r.evaluation?.score ?? "-"}</div>
+                <div className="mt-1 flex items-center justify-between">
+                  <span className="text-xs text-neon">score {r.evaluation?.score ?? "-"}</span>
+                  <button
+                    onClick={() => setExpandedId(expandedId === r.id ? null : r.id)}
+                    className="text-xs text-muted underline hover:text-neon"
+                  >
+                    {expandedId === r.id ? "Hide" : "View / download"}
+                  </button>
+                </div>
+                {expandedId === r.id && (
+                  <OutputPreview output={r.output} filenameBase={`west-creatives-${r.id}`} />
+                )}
               </div>
             ))}
           </div>

@@ -6,6 +6,7 @@ import type { AgentType, Modality } from "@/lib/types";
 import { useNotifications } from "@/components/NotificationProvider";
 import { OutputPreview } from "@/components/OutputPreview";
 import { parseSkillFile } from "@/lib/skillParser";
+import { MODELS_BY_TYPE, OTHER_MODEL_OPTION } from "@/lib/models";
 
 interface DeveloperAgent {
   id: string;
@@ -53,7 +54,7 @@ const BLANK_FORM = {
   name: "",
   description: "",
   type: "text" as AgentType,
-  model: "",
+  model: MODELS_BY_TYPE.text[0]?.id ?? "",
   priceUsdc: "0.02",
   capabilities: "",
   nicheIndustry: "",
@@ -71,6 +72,15 @@ export default function DeveloperDashboard({ ownerId }: { ownerId: string }) {
   const [skillFileName, setSkillFileName] = useState<string | null>(null);
   const [modelWasGuessed, setModelWasGuessed] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Model options for whichever content type is currently selected, plus
+  // whether the form's current model value is one of them — drives the
+  // dropdown vs. "Other" free-text toggle below. Recomputed from `form`
+  // state directly rather than stored separately, so it can never drift
+  // out of sync with a type change or a skill.md upload overwriting
+  // form.model to something outside the curated list.
+  const currentModelOptions = MODELS_BY_TYPE[form.type] ?? [];
+  const isKnownModel = currentModelOptions.some((m) => m.id === form.model);
 
   function loadSummary() {
     setLoading(true);
@@ -250,7 +260,14 @@ export default function DeveloperDashboard({ ownerId }: { ownerId: string }) {
               />
               <select
                 value={form.type}
-                onChange={(e) => setForm({ ...form, type: e.target.value as AgentType })}
+                onChange={(e) => {
+                  // Changing content type re-anchors the model dropdown to
+                  // that type's own curated options — a model slug picked
+                  // for "video" is meaningless once switched to "audio".
+                  const nextType = e.target.value as AgentType;
+                  const nextOptions = MODELS_BY_TYPE[nextType] ?? [];
+                  setForm((prev) => ({ ...prev, type: nextType, model: nextOptions[0]?.id ?? "" }));
+                }}
                 className="rounded-lg border border-border-subtle bg-surface px-2.5 py-1.5 text-xs outline-none"
               >
                 {AGENT_TYPES.map((t) => (
@@ -259,13 +276,32 @@ export default function DeveloperDashboard({ ownerId }: { ownerId: string }) {
                   </option>
                 ))}
               </select>
-              <input
-                required
-                value={form.model}
-                onChange={(e) => setForm({ ...form, model: e.target.value })}
-                placeholder="Model (e.g. google/gemini-2.5-flash-lite)"
-                className="col-span-2 rounded-lg border border-border-subtle bg-surface px-2.5 py-1.5 text-xs outline-none"
-              />
+              <div className="col-span-2 space-y-1.5">
+                <select
+                  value={isKnownModel ? form.model : OTHER_MODEL_OPTION}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setForm({ ...form, model: value === OTHER_MODEL_OPTION ? "" : value });
+                  }}
+                  className="w-full rounded-lg border border-border-subtle bg-surface px-2.5 py-1.5 text-xs outline-none"
+                >
+                  {currentModelOptions.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                  <option value={OTHER_MODEL_OPTION}>Other (custom model slug)</option>
+                </select>
+                {!isKnownModel && (
+                  <input
+                    required
+                    value={form.model}
+                    onChange={(e) => setForm({ ...form, model: e.target.value })}
+                    placeholder="Custom model slug (e.g. openai/gpt-image-1)"
+                    className="w-full rounded-lg border border-border-subtle bg-surface px-2.5 py-1.5 text-xs outline-none"
+                  />
+                )}
+              </div>
               <textarea
                 value={form.description}
                 onChange={(e) => setForm({ ...form, description: e.target.value })}

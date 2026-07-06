@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import { useAccount } from "wagmi";
 import { ExternalLink, Wallet, Copy, Check, RefreshCw } from "lucide-react";
 import CreatorDashboard from "@/components/CreatorDashboard";
 import DeveloperDashboard from "@/components/DeveloperDashboard";
@@ -18,7 +17,6 @@ import DeveloperDashboard from "@/components/DeveloperDashboard";
  */
 export default function DashboardPage() {
   const { data: session } = useSession();
-  const { status: walletStatus } = useAccount();
   const [ownerId, setOwnerId] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
   const [walletAddress, setWalletAddress] = useState<string>("");
@@ -84,21 +82,10 @@ export default function DashboardPage() {
     });
   }
 
-  // If this session's identity came from a wallet and that wallet is later
-  // disconnected, drop it from local storage/state so the dashboard reflects
-  // a signed-out account instead of continuing to show stale wallet info.
-  // Gated on the confirmed "disconnected" status (not "connecting" /
-  // "reconnecting") so a page refresh mid-reconnect doesn't wrongly clear it.
-  useEffect(() => {
-    if (walletStatus !== "disconnected") return;
-    const oid = localStorage.getItem("vibe.ownerId");
-    if (oid && oid.startsWith("wallet-")) {
-      localStorage.removeItem("vibe.ownerId");
-      localStorage.removeItem("vibe.role");
-      setOwnerId(null);
-      setRole(null);
-    }
-  }, [walletStatus]);
+  // Wallet disconnect handling (clearing ownerId/role + redirecting home)
+  // now lives app-wide in src/components/WalletSessionSync.tsx, mounted in
+  // the root layout — it fires regardless of which page the disconnect
+  // happens on, not just while this page is mounted.
 
   if (!ownerId) {
     return (

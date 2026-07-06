@@ -13,6 +13,7 @@
  * need a real parser to extract reliably.
  */
 import type { AgentType, Modality } from "@/lib/types";
+import { MODELS_BY_TYPE } from "@/lib/models";
 
 export interface ParsedSkillMetadata {
   name?: string;
@@ -32,19 +33,19 @@ const TYPE_KEYWORDS: Record<Exclude<AgentType, "director" | "custom">, string[]>
   editing: ["edit", "editing", "retouch", "remix", "upscale", "restyle", "inpaint"],
 };
 
-// Sensible non-empty defaults per content type, matching this app's own
-// seed roster (src/lib/db.ts) — used only when the skill.md doesn't state
-// its own model explicitly, so the form never starts on a blank/invalid
-// model string.
-const DEFAULT_MODEL_BY_TYPE: Record<AgentType, string> = {
-  image: "black-forest-labs/flux.2-klein-4b",
-  video: "bytedance/seedance-2.0-fast",
-  audio: "eleven_multilingual_v2",
-  text: "google/gemini-2.5-flash-lite",
-  editing: "openai/gpt-image-1",
-  director: "claude-orchestrator-v1",
-  custom: "google/gemini-2.5-flash-lite",
-};
+// Sensible non-empty defaults per content type — used only when the
+// skill.md doesn't state its own model explicitly, so the form never
+// starts on a blank/invalid model string. Sourced from the same curated
+// list src/lib/models.ts drives the registration form's model dropdown
+// from, so this always defaults to the first (cheapest/most-used) known
+// model for that type rather than maintaining a second, separate list
+// that could drift out of sync with it.
+const DEFAULT_MODEL_BY_TYPE: Record<AgentType, string> = Object.fromEntries(
+  (Object.keys(MODELS_BY_TYPE) as AgentType[]).map((type) => [
+    type,
+    MODELS_BY_TYPE[type][0]?.id ?? "google/gemini-2.5-flash-lite",
+  ])
+) as Record<AgentType, string>;
 
 /** Splits a skill.md file into its YAML-ish frontmatter block (if present)
  * and the remaining markdown body. Frontmatter is parsed as flat
@@ -134,10 +135,16 @@ export function parseSkillFile(raw: string): ParsedSkillMetadata {
 
   const fullText = [name, description, body].filter(Boolean).join("\n");
 
-  // An explicit "Model: ..." / "model: xyz" mention anywhere (frontmatter
-  // already covers the frontmatter case; this also catches it stated in
-  // the body, e.g. under a "## Model" heading).
+  // An explicit model mention, checked in two places: a `model: xyz` (or
+  // `model = xyz`) frontmatter key — the most natural place a skill.md
+  // author would put it — and, failing that, the same pattern anywhere in
+  // the body text (e.g. under a "## Model" heading). frontmatter.model was
+  // previously parsed by splitFrontmatter() but never actually read back
+  // here, so a skill.md that only stated its model in frontmatter (as
+  // opposed to inline body prose matching "model: xyz") silently fell back
+  // to the type's generic default instead of the file's real model.
   const modelMatch = fullText.match(/\bmodel\s*[:=]\s*([a-z0-9._/-]+)/i);
+  const explicitModel = frontmatter.model || modelMatch?.[1];
 
   const { type, modality } = inferTypeAndModality(fullText);
 
@@ -147,8 +154,8 @@ export function parseSkillFile(raw: string): ParsedSkillMetadata {
   return {
     name,
     description,
-    model: modelMatch?.[1] ?? DEFAULT_MODEL_BY_TYPE[type],
-    modelGuessed: !modelMatch,
+    model: explicitModel ?? DEFAULT_MODEL_BY_TYPE[type],
+    modelGuessed: !explicitModel,
     type,
     modality,
     capabilities: finalCapabilities,

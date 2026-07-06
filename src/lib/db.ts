@@ -172,6 +172,97 @@ function toPgSql(sql: string): string {
   return sql.replace(/\?/g, () => `$${++i}`);
 }
 
+/**
+ * Every mixed-case column (and SELECT alias) referenced anywhere in this
+ * codebase's raw SQL. Postgres folds *unquoted* identifiers to lowercase at
+ * both CREATE TABLE time and query time — so a column declared/queried as
+ * `priceUsdc` is physically stored as, and returned by node-postgres as,
+ * `priceusdc`. SQLite preserves declared case exactly, so this mismatch is
+ * Postgres-only, which is why it went unnoticed locally: every row read
+ * through SQLite already has the right casing, and most existing call
+ * sites either didn't read the affected fields (e.g. the old single-
+ * agent-per-modality flow never read agents.priceUsdc/score at all) or
+ * silently fell back to a default when a value came back `undefined`
+ * (e.g. settlePaymentSplit's `agentRow.walletAddress ?? "0xdemoDeveloperWallet"`)
+ * instead of throwing — so this was a real, live bug on Postgres deployments
+ * well before it surfaced as a hard "NaN" budget error or the analytics
+ * page's `undefined.toFixed()` crash.
+ *
+ * restorePgRowCasing runs on every row Postgres returns and copies each
+ * known lowercase-folded key back onto its correct camelCase name (without
+ * removing the lowercase key, so nothing that happened to read the
+ * lowercase form directly keeps working too) — fixing this class of bug
+ * globally, for every existing and future query, without needing to quote
+ * every identifier in every SQL string throughout the app.
+ */
+const CAMEL_CASE_COLUMNS = [
+  "developerId",
+  "nicheSocialMedia",
+  "nicheIndustry",
+  "generationParadigm",
+  "transactionCount",
+  "priceUsdc",
+  "walletAddress",
+  "xHandle",
+  "onchainAgentId",
+  "createdAt",
+  "creatorId",
+  "agentId",
+  "enhancedPrompt",
+  "evaluationJson",
+  "costUsdc",
+  "developerShareUsdc",
+  "platformShareUsdc",
+  "reputationTxHash",
+  "reputationWarning",
+  "generationWarning",
+  "videoJobId",
+  "videoPollingUrl",
+  "videoStatus",
+  "batchId",
+  "reserveDebitTxHash",
+  "reserveDebitWarning",
+  "fromWallet",
+  "toWallet",
+  "amountUsdc",
+  "txHash",
+  "ownerId",
+  "agentTokenId",
+  "requestHash",
+  "ownerWalletAddress",
+  "validatorWalletAddress",
+  "requestURI",
+  "requestTxHash",
+  "responseTag",
+  "responseTxHash",
+  "respondedAt",
+  "targetAudience",
+  "voiceProfile",
+  "stylePrefix",
+  // SELECT aliases used in raw SQL (not physical columns, but hit the same
+  // Postgres unquoted-identifier folding) — e.g.
+  // src/app/api/content/history/route.ts's `a.name AS agentName`, and the
+  // COUNT/SUM aliases in src/app/api/analytics/summary/route.ts.
+  "agentName",
+  "agentModel",
+  "contentCount",
+  "totalSpend",
+  "developerEarnings",
+  "platformRevenue",
+] as const;
+
+const LOWERCASE_TO_CAMEL = new Map(CAMEL_CASE_COLUMNS.map((c) => [c.toLowerCase(), c]));
+
+function restorePgRowCasing<T extends Record<string, unknown>>(row: T): T {
+  for (const [lower, camel] of LOWERCASE_TO_CAMEL) {
+    if (lower === camel) continue;
+    if (Object.prototype.hasOwnProperty.call(row, lower) && !(camel in row)) {
+      (row as Record<string, unknown>)[camel] = row[lower];
+    }
+  }
+  return row;
+}
+
 let _dbPromise: Promise<DbClient> | null = null;
 
 export function getDb(): Promise<DbClient> {
@@ -223,11 +314,11 @@ async function initPostgres(connectionString: string): Promise<DbClient> {
   const client: DbClient = {
     async get(sql, params = []) {
       const { rows } = await pool.query(toPgSql(sql), params);
-      return rows[0];
+      return rows[0] ? (restorePgRowCasing(rows[0]) as never) : undefined;
     },
     async all(sql, params = []) {
       const { rows } = await pool.query(toPgSql(sql), params);
-      return rows;
+      return rows.map((r) => restorePgRowCasing(r)) as never;
     },
     async run(sql, params = []) {
       await pool.query(toPgSql(sql), params);

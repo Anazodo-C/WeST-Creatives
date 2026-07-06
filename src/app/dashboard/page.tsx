@@ -6,6 +6,7 @@ import { useAccount } from "wagmi";
 import { ExternalLink, Wallet, Sparkles, Loader2, Copy, Check, RefreshCw, Download } from "lucide-react";
 import type { ContentRecord, ContentModality } from "@/lib/types";
 import { AGENT_PRICE_USDC } from "@/lib/pricing";
+import { useNotifications } from "@/components/NotificationProvider";
 
 type OutputKind = "image" | "audio" | "video" | "text";
 
@@ -117,6 +118,7 @@ function OutputPreview({
 export default function DashboardPage() {
   const { data: session } = useSession();
   const { status: walletStatus } = useAccount();
+  const { notify } = useNotifications();
   const [ownerId, setOwnerId] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
   const [walletAddress, setWalletAddress] = useState<string>("");
@@ -354,8 +356,9 @@ export default function DashboardPage() {
       setLastBatch(records);
       setHistory((h) => [...records, ...h]);
       setScoutSummary(data.scoutSummary ?? null);
+      notify(`Generated ${records.length} output${records.length === 1 ? "" : "s"}.`, "success");
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Something went wrong");
+      notify(err instanceof Error ? err.message : "Something went wrong", "error");
     } finally {
       setGenerating(false);
     }

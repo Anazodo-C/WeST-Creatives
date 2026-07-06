@@ -13,6 +13,7 @@ import {
   Cell,
 } from "recharts";
 import { Trophy } from "lucide-react";
+import { useNotifications } from "@/components/NotificationProvider";
 
 interface Summary {
   totals: {
@@ -38,23 +39,56 @@ const COLORS = ["#39ff88", "#1f8f4d", "#2a2b2e", "#9a9ba0", "#0f5c30"];
 
 export default function AnalyticsPage() {
   const [data, setData] = useState<Summary | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const { notify } = useNotifications();
 
   useEffect(() => {
     fetch("/api/analytics/summary")
-      .then((r) => r.json())
-      .then(setData);
+      .then(async (r) => {
+        const body = await r.json().catch(() => null);
+        if (!r.ok || !body) {
+          throw new Error(body?.error || `Analytics request failed (${r.status}).`);
+        }
+        return body as Summary;
+      })
+      .then(setData)
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : "Could not load analytics.";
+        setLoadError(message);
+        notify(message, "error");
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  if (loadError) {
+    return (
+      <div className="mx-auto max-w-6xl px-6 py-24 text-center text-muted">
+        Couldn&apos;t load analytics: {loadError}
+      </div>
+    );
+  }
 
   if (!data) {
     return <div className="mx-auto max-w-6xl px-6 py-24 text-center text-muted">Loading analytics…</div>;
   }
 
+  // Guard against any still-missing numeric field (e.g. a brand-new
+  // deployment with zero rows in some tables) rendering as
+  // undefined.toFixed() crashes rather than a sensible "0.000".
+  const totals = {
+    contentCount: data.totals.contentCount ?? 0,
+    totalSpend: data.totals.totalSpend ?? 0,
+    developerEarnings: data.totals.developerEarnings ?? 0,
+    platformRevenue: data.totals.platformRevenue ?? 0,
+    transactionCount: data.totals.transactionCount ?? 0,
+  };
+
   const statCards = [
-    { label: "Content generated", value: data.totals.contentCount },
-    { label: "Total spend (USDC)", value: data.totals.totalSpend.toFixed(3) },
-    { label: "Developer earnings", value: data.totals.developerEarnings.toFixed(3) },
-    { label: "Platform revenue", value: data.totals.platformRevenue.toFixed(3) },
-    { label: "Transactions", value: data.totals.transactionCount },
+    { label: "Content generated", value: totals.contentCount },
+    { label: "Total spend (USDC)", value: totals.totalSpend.toFixed(3) },
+    { label: "Developer earnings", value: totals.developerEarnings.toFixed(3) },
+    { label: "Platform revenue", value: totals.platformRevenue.toFixed(3) },
+    { label: "Transactions", value: totals.transactionCount },
   ];
 
   return (

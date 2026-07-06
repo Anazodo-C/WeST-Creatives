@@ -12,6 +12,7 @@ import NavBar from "@/components/NavBar";
 import Footer from "@/components/Footer";
 import AuthProvider from "@/components/AuthProvider";
 import Web3Provider from "@/components/Web3Provider";
+import NotificationProvider from "@/components/NotificationProvider";
 
 export const metadata: Metadata = {
   title: "West Creatives — Marketplace for Vibe Creators",
@@ -29,9 +30,11 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <AuthProvider>
           <Web3Provider>
-            <NavBar />
-            <main className="flex-1">{children}</main>
-            <Footer />
+            <NotificationProvider>
+              <NavBar />
+              <main className="flex-1">{children}</main>
+              <Footer />
+            </NotificationProvider>
           </Web3Provider>
         </AuthProvider>
       </body>

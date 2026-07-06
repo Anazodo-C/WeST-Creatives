@@ -1,7 +1,7 @@
 # ADR-0001: Automatic USDC Refill for OpenRouter Credits
 
-**Status:** Proposed
-**Date:** 2026-07-06
+**Status:** On hold (see Update below) — Option C (x402) verified not actionable today
+**Date:** 2026-07-06 (updated same day after Option C follow-up)
 **Deciders:** West Creatives maintainer
 
 ## Context
@@ -163,20 +163,59 @@ nanopayment thesis.
   rules out a plausible-sounding approach and should stop future proposals from
   re-treading it.
 
+## Update: Option C follow-up (same day) — Router402 is not a usable target
+
+Action item #1/#2 above were run down immediately. Result: **Option C is not
+buildable against any real endpoint today**, for a more specific reason than
+"OpenRouter's rollout is incomplete."
+
+- Circle's own reference recipe (EOA wallet + `signTypedData`, confirmed real and
+  working: `POST https://api.circle.com/v1/w3s/developer/sign/typedData`) produces a
+  correct EIP-3009 `TransferWithAuthorization` signature per the x402 "exact" EVM
+  scheme — genuinely solid, verified infrastructure.
+- But **Router402 does not accept that signature directly.** Its actual documented
+  integration surface (docs.router402.xyz) is: a human goes through Router402's own
+  web app, creates a Pimlico-managed smart account, deposits USDC into *that*
+  account via Router402's UI, and receives a JWT API key. Every subsequent API call
+  is plain `Authorization: Bearer <jwt>` — structurally identical to calling
+  OpenRouter today. The x402/session-key mechanics are entirely internal to
+  Router402's own backend; there is no path for an external, self-controlled wallet
+  (Circle-managed or otherwise) to hand Router402 a self-signed payment directly.
+- OpenRouter itself still has no publicly documented, verifiable x402 endpoint for
+  the models this app uses (only third-party commentary that it's "transitioning").
+
+Net effect: the two concrete gateways this ADR could point at (OpenRouter directly,
+Router402) both reduce back to "get an API key, hold a balance with a third party"
+— the exact problem Option C was supposed to eliminate. Building the generic x402
+client (Circle EOA + signTypedData) today would produce real, spec-compliant code
+with **no compliant target to actually settle against** for this app's use case —
+infrastructure with no current payoff.
+
+**Decision: hold off entirely**, per direct confirmation from the maintainer.
+Keep `OPENROUTER_API_KEY` as-is. Revisit if either of these changes:
+- OpenRouter ships and documents a live x402 endpoint for
+  google/gemini-2.5-flash-lite / black-forest-labs/flux.2-klein-4b /
+  bytedance/seedance-2.0-fast (or their then-current equivalents), or
+- A different x402-native gateway emerges that accepts an externally-signed
+  payment directly (i.e. doesn't require onboarding through its own proprietary
+  wallet/account system).
+
 ## Action Items
 
-1. [ ] Verify current x402 coverage on OpenRouter directly (openrouter.ai/docs, search
-      "x402") for the specific models this app defaults to
-      (google/gemini-2.5-flash-lite, black-forest-labs/flux.2-klein-4b,
-      bytedance/seedance-2.0-fast) before committing to Option C.
-2. [ ] If coverage is incomplete, evaluate a compatible x402 gateway (e.g. Router402)
-      as an interim `OPENROUTER_*` base-URL swap, gated behind an env var so it's a
-      one-line rollback.
-3. [ ] Prototype smart-account session-key signing (Pimlico or ZeroDev) against the
-      platform's existing treasury wallet in src/lib/platformWallet.ts.
+1. [x] Verify current x402 coverage on OpenRouter directly for the specific models
+      this app defaults to — inconclusive from public docs; no confirmed live
+      endpoint found.
+2. [x] Evaluate Router402 as an interim target — ruled out; requires its own
+      proprietary account/wallet onboarding, not a drop-in for a self-signed
+      payment.
+3. [ ] Not pursued (blocked by #2's finding): prototype smart-account session-key
+      signing against the platform's treasury wallet.
 4. [ ] Re-check developers.circle.com/gateway's supported-chains list once Arc
       mainnet is live, in case Option A's chain-bridging step becomes relevant for a
       *different* future integration (e.g. paying other non-OpenRouter vendors that
       do still accept direct on-chain USDC).
 5. [ ] If pursuing Option B instead/additionally, scope Circle's business off-ramp
       API and KYB requirements before estimating effort.
+6. [ ] Periodically re-check whether OpenRouter or a legitimate x402 gateway ships
+      a genuinely external-wallet-compatible payment endpoint — this is the one
+      finding that would reopen Option C.

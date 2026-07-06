@@ -286,30 +286,41 @@ async function initPostgres(connectionString: string): Promise<DbClient> {
   // simple query protocol accepts the `;`-separated statements directly).
   await pool.query(SCHEMA_SQL);
   // CREATE TABLE IF NOT EXISTS is a no-op for tables that already existed
-  // before onchainAgentId was added — patch it in for any database created
-  // by an earlier version of this file. Ignored if it's already there.
-  await pool.query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS onchainAgentId TEXT").catch(() => {});
+  // before these columns were added — patch them in for any database
+  // created by an earlier version of this file. Every one of these used to
+  // be its own awaited round trip (10+ in sequence, on top of the schema
+  // query and seedIfEmpty's own round trips below) — since this whole init
+  // path reruns on *every* cold start of *every* serverless function that
+  // calls getDb() (each API route is its own Lambda with its own module
+  // scope, so the module-level `_dbPromise` cache doesn't share across
+  // routes), that serial chain was adding real, noticeable latency to
+  // whichever page's requests happened to hit a cold function — which on
+  // the dashboard means several routes at once (wallet, history, brand,
+  // budget-recommendation, developer summary), unlike simpler pages that
+  // touch the DB once or not at all. Batched into one multi-statement
+  // query (all IF NOT EXISTS, so a column that already exists is just a
+  // no-op, not an error) turns 9 round trips into 1.
   await pool
-    .query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS reputationTxHash TEXT")
-    .catch(() => {});
-  await pool
-    .query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS reputationWarning TEXT")
-    .catch(() => {});
-  await pool
-    .query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS generationWarning TEXT")
-    .catch(() => {});
-  await pool.query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS videoJobId TEXT").catch(() => {});
-  await pool
-    .query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS videoPollingUrl TEXT")
-    .catch(() => {});
-  await pool.query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS videoStatus TEXT").catch(() => {});
-  await pool.query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS batchId TEXT").catch(() => {});
-  await pool
-    .query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS reserveDebitTxHash TEXT")
-    .catch(() => {});
-  await pool
-    .query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS reserveDebitWarning TEXT")
-    .catch(() => {});
+    .query(
+      `
+      ALTER TABLE agents ADD COLUMN IF NOT EXISTS onchainAgentId TEXT;
+      ALTER TABLE content_records ADD COLUMN IF NOT EXISTS reputationTxHash TEXT;
+      ALTER TABLE content_records ADD COLUMN IF NOT EXISTS reputationWarning TEXT;
+      ALTER TABLE content_records ADD COLUMN IF NOT EXISTS generationWarning TEXT;
+      ALTER TABLE content_records ADD COLUMN IF NOT EXISTS videoJobId TEXT;
+      ALTER TABLE content_records ADD COLUMN IF NOT EXISTS videoPollingUrl TEXT;
+      ALTER TABLE content_records ADD COLUMN IF NOT EXISTS videoStatus TEXT;
+      ALTER TABLE content_records ADD COLUMN IF NOT EXISTS batchId TEXT;
+      ALTER TABLE content_records ADD COLUMN IF NOT EXISTS reserveDebitTxHash TEXT;
+      ALTER TABLE content_records ADD COLUMN IF NOT EXISTS reserveDebitWarning TEXT;
+    `
+    )
+    .catch(() => {
+      // Swallow rather than throw — every statement is IF NOT EXISTS so a
+      // real failure here would mean the connection itself is broken, which
+      // the very next query (seedIfEmpty, or the first real caller) will
+      // surface clearly anyway.
+    });
 
   const client: DbClient = {
     async get(sql, params = []) {
@@ -623,54 +634,67 @@ async function seedIfEmpty(db: DbClient) {
   const existingByName = new Map(existing.map((r) => [r.name, r.id]));
 
   const now = new Date().toISOString();
-  let rank = existing.length;
+  let nextRank = existing.length;
 
-  for (const a of demoAgents) {
-    const existingId = existingByName.get(a.name);
-    if (existingId) {
-      await db.run(
-        `UPDATE agents SET description = ?, type = ?, capabilities = ?, model = ?, nicheIndustry = ?, modality = ?, scope = ?, generationParadigm = ?, score = ?, priceUsdc = ? WHERE id = ?`,
+  // Fired concurrently (Promise.all) rather than one-at-a-time — this used
+  // to await each of the ~12 seed agents' UPDATE/INSERT in series, which on
+  // Postgres (Railway) meant ~12 sequential network round trips on every
+  // cold start of every serverless function that calls getDb() (see the
+  // comment above the ALTER TABLE batch in initPostgres for why that's
+  // significant). Each row here is independent — none of these need to
+  // observe another's result mid-batch — so running them concurrently
+  // against the connection pool turns that into roughly one round trip's
+  // worth of wall-clock time instead of the sum of all of them. Rank for
+  // new inserts is precomputed per-row (not a shared counter mutated
+  // inside each concurrent task) to avoid a race on which insert gets
+  // which rank.
+  await Promise.all(
+    demoAgents.map((a) => {
+      const existingId = existingByName.get(a.name);
+      if (existingId) {
+        return db.run(
+          `UPDATE agents SET description = ?, type = ?, capabilities = ?, model = ?, nicheIndustry = ?, modality = ?, scope = ?, generationParadigm = ?, score = ?, priceUsdc = ? WHERE id = ?`,
+          [
+            a.description,
+            a.type,
+            JSON.stringify(a.capabilities),
+            a.model,
+            a.niche,
+            a.modality,
+            a.scope,
+            a.generationParadigm,
+            a.score,
+            a.price,
+            existingId,
+          ]
+        );
+      }
+
+      const rank = ++nextRank;
+      return db.run(
+        `INSERT INTO agents (id, name, developerId, description, type, capabilities, model, nicheSocialMedia, nicheIndustry, modality, scope, generationParadigm, rank, score, transactionCount, priceUsdc, walletAddress, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
+          randomUUID(),
+          a.name,
+          "platform-genesis-developer",
           a.description,
           a.type,
           JSON.stringify(a.capabilities),
           a.model,
+          null,
           a.niche,
           a.modality,
           a.scope,
           a.generationParadigm,
+          rank,
           a.score,
+          Math.floor(Math.random() * 400) + 20,
           a.price,
-          existingId,
+          null,
+          now,
         ]
       );
-      continue;
-    }
-
-    rank += 1;
-    await db.run(
-      `INSERT INTO agents (id, name, developerId, description, type, capabilities, model, nicheSocialMedia, nicheIndustry, modality, scope, generationParadigm, rank, score, transactionCount, priceUsdc, walletAddress, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        randomUUID(),
-        a.name,
-        "platform-genesis-developer",
-        a.description,
-        a.type,
-        JSON.stringify(a.capabilities),
-        a.model,
-        null,
-        a.niche,
-        a.modality,
-        a.scope,
-        a.generationParadigm,
-        rank,
-        a.score,
-        Math.floor(Math.random() * 400) + 20,
-        a.price,
-        null,
-        now,
-      ]
-    );
-  }
+    })
+  );
 }

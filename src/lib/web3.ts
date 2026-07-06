@@ -1,7 +1,8 @@
 "use client";
 
 import { createConfig, http } from "wagmi";
-import { getDefaultConfig } from "@rainbow-me/rainbowkit";
+import { getDefaultConfig, getDefaultWallets } from "@rainbow-me/rainbowkit";
+import { rabbyWallet, zerionWallet } from "@rainbow-me/rainbowkit/wallets";
 import { arcTestnet } from "viem/chains";
 
 export { arcTestnet };
@@ -43,6 +44,16 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://west-creatives.verce
  * `useEffect`.
  */
 export function buildWeb3Config() {
+  // RainbowKit's built-in "Popular" group (Safe, Rainbow, Base Account,
+  // MetaMask, WalletConnect) doesn't include Zerion or Rabby — both ship as
+  // selectable connectors in this RainbowKit version, just not in the
+  // default list, so they're added here as a second group rather than
+  // replacing the defaults. getDefaultWallets() only returns wallet-creator
+  // function references (it doesn't invoke or construct any connector), so
+  // it's safe to call here — same client-only-after-mount context as
+  // getDefaultConfig() below (see the long comment above).
+  const { wallets } = getDefaultWallets();
+
   return getDefaultConfig({
     appName: "West Creatives",
     appUrl: APP_URL,
@@ -50,6 +61,13 @@ export function buildWeb3Config() {
     projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "00000000000000000000000000000000",
     chains: [arcTestnet],
     ssr: true,
+    wallets: [
+      ...wallets,
+      {
+        groupName: "More options",
+        wallets: [zerionWallet, rabbyWallet],
+      },
+    ],
   });
 }
 

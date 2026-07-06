@@ -339,6 +339,11 @@ export default function DashboardPage() {
             <div className="mt-4 rounded-xl border border-neon-dim bg-neon/5 p-4 text-sm">
               <div className="text-muted">Evaluation score</div>
               <div className="text-2xl font-bold text-neon">{lastResult.evaluation.score}/100</div>
+              {lastResult.generationWarning && (
+                <p className="mt-2 rounded-lg border border-yellow-600/40 bg-yellow-500/10 p-2 text-xs text-yellow-500">
+                  {lastResult.generationWarning}
+                </p>
+              )}
               <OutputPreview output={lastResult.output} filenameBase={`west-creatives-${lastResult.id}`} />
             </div>
           )}
@@ -367,7 +372,14 @@ export default function DashboardPage() {
                   </button>
                 </div>
                 {expandedId === r.id && (
-                  <OutputPreview output={r.output} filenameBase={`west-creatives-${r.id}`} />
+                  <>
+                    {r.generationWarning && (
+                      <p className="mt-2 rounded-lg border border-yellow-600/40 bg-yellow-500/10 p-2 text-xs text-yellow-500">
+                        {r.generationWarning}
+                      </p>
+                    )}
+                    <OutputPreview output={r.output} filenameBase={`west-creatives-${r.id}`} />
+                  </>
                 )}
               </div>
             ))}

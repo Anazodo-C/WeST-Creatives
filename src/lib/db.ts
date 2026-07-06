@@ -86,6 +86,10 @@ const SCHEMA_SQL = `
     -- failed (see reputationWarning).
     reputationTxHash TEXT,
     reputationWarning TEXT,
+    -- Set when real generation (currently just image.ts's Gemini call) fell
+    -- back to a demo placeholder — see ContentRecord.generationWarning in
+    -- src/lib/types.ts.
+    generationWarning TEXT,
     createdAt TEXT NOT NULL
   );
 
@@ -183,6 +187,9 @@ async function initPostgres(connectionString: string): Promise<DbClient> {
   await pool
     .query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS reputationWarning TEXT")
     .catch(() => {});
+  await pool
+    .query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS generationWarning TEXT")
+    .catch(() => {});
 
   const client: DbClient = {
     async get(sql, params = []) {
@@ -226,6 +233,11 @@ async function initSqlite(): Promise<DbClient> {
   }
   try {
     db.exec("ALTER TABLE content_records ADD COLUMN reputationWarning TEXT");
+  } catch {
+    // already exists — fine
+  }
+  try {
+    db.exec("ALTER TABLE content_records ADD COLUMN generationWarning TEXT");
   } catch {
     // already exists — fine
   }

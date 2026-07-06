@@ -47,7 +47,7 @@ export function buildImageAttributes(
 export async function generateImage(
   attributes: ImagePromptAttributes,
   brand?: Partial<BrandProfile>
-): Promise<{ url: string; description: string; demo: boolean }> {
+): Promise<{ url: string; description: string; demo: boolean; warning?: string }> {
   const compiledPrompt = [
     attributes.subject,
     attributes.action,
@@ -59,10 +59,11 @@ export async function generateImage(
     .filter(Boolean)
     .join(". ");
 
-  const placeholder = () => ({
+  const placeholder = (warning?: string) => ({
     url: `data:image/svg+xml;utf8,${encodeURIComponent(placeholderSvg(attributes.subject))}`,
     description: compiledPrompt,
     demo: true,
+    warning,
   });
 
   if (!GOOGLE_API_KEY) {
@@ -75,24 +76,48 @@ export async function generateImage(
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-image",
       contents: compiledPrompt,
+      // Required: without this, the model can (and often does) just answer
+      // conversationally with text and no inlineData part at all — no error
+      // thrown, it just silently never returns an image. Not documented as
+      // a hard requirement anywhere on Google's page, but every non-trivial
+      // official sample sets it, and its absence is the most common cause
+      // of "real key set, still get the placeholder, no error in sight."
+      config: {
+        responseModalities: ["TEXT", "IMAGE"],
+      },
     });
 
     const part = response.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data);
     const base64 = part?.inlineData?.data;
     const mimeType = part?.inlineData?.mimeType || "image/png";
 
-    if (!base64) return placeholder();
+    if (!base64) {
+      // The call succeeded but returned no image bytes — most likely the
+      // model responded with text only (safety refusal, or just chose not
+      // to render an image for this prompt). Log the text it *did* return
+      // so this is diagnosable from Vercel function logs instead of a
+      // silent, unexplained placeholder.
+      const textPart = response.candidates?.[0]?.content?.parts?.find((p) => p.text);
+      const reason = textPart?.text?.slice(0, 200) || "Model returned no image data and no explanatory text.";
+      console.error("[generateImage] no inlineData in response:", reason);
+      return placeholder(`Gemini returned no image: ${reason}`);
+    }
 
     return {
       url: `data:${mimeType};base64,${base64}`,
       description: compiledPrompt,
       demo: false,
     };
-  } catch {
-    // Common causes: expired/invalid key, quota/billing exhausted, or image
-    // generation not enabled for this API key/project — fall back to the
-    // placeholder instead of failing the whole generation request.
-    return placeholder();
+  } catch (err) {
+    // Common causes: expired/invalid key, or billing not enabled — Google's
+    // pricing docs list NO free tier at all for gemini-2.5-flash-image, so a
+    // key that works fine for text (ANTHROPIC_API_KEY-style free usage) can
+    // still fail here specifically if the linked Google Cloud project has no
+    // billing account attached. Logged (not just swallowed) so this is
+    // actually diagnosable, plus surfaced as a warning on the result.
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("[generateImage] real Gemini call failed:", message);
+    return placeholder(`Gemini image generation failed, used a placeholder instead: ${message}`);
   }
 }
 

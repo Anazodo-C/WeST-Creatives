@@ -100,8 +100,8 @@ export async function POST(req: NextRequest) {
     }
 
     await db.run(
-      `INSERT INTO content_records (id, creatorId, agentId, modality, prompt, enhancedPrompt, output, evaluationJson, costUsdc, developerShareUsdc, platformShareUsdc, reputationTxHash, reputationWarning, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO content_records (id, creatorId, agentId, modality, prompt, enhancedPrompt, output, evaluationJson, costUsdc, developerShareUsdc, platformShareUsdc, reputationTxHash, reputationWarning, generationWarning, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         record.id,
         record.creatorId,
@@ -116,6 +116,7 @@ export async function POST(req: NextRequest) {
         platformShare,
         reputationTxHash ?? null,
         reputationWarning ?? null,
+        record.generationWarning ?? null,
         record.createdAt,
       ]
     );

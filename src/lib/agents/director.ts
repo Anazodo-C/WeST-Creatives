@@ -33,12 +33,14 @@ export async function runDirector(
   const enhancedPrompt = await enhancePrompt(request.prompt, request.brand);
 
   let output = "";
+  let generationWarning: string | undefined;
   if (request.modality === "text") {
     output = await generateText(enhancedPrompt, request.brand);
   } else if (request.modality === "image") {
     const attrs = buildImageAttributes(enhancedPrompt, request.brand);
     const img = await generateImage(attrs, request.brand);
     output = img.url || img.description;
+    generationWarning = img.warning;
   } else if (request.modality === "video") {
     const scenes = planScenes(enhancedPrompt);
     const vid = await generateVideo(scenes, request.brand);
@@ -64,6 +66,7 @@ export async function runDirector(
     output,
     evaluation,
     costUsdc: cost,
+    generationWarning,
     createdAt: new Date().toISOString(),
   };
 }

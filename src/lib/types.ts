@@ -83,6 +83,12 @@ export interface ContentRecord {
   costUsdc: number;
   developerShareUsdc: number;
   platformShareUsdc: number;
+  // Set when the real generation call (currently just image.ts's Gemini
+  // call) fell back to a demo placeholder — e.g. billing not enabled, the
+  // model returned text instead of an image, or a network/auth error. Lets
+  // the UI explain *why* the output is a placeholder instead of leaving it
+  // unexplained.
+  generationWarning?: string;
   createdAt: string;
 }
 

@@ -99,11 +99,20 @@ export async function generateImage(
       demo: false,
     };
   } catch (err) {
-    // Common causes: expired/invalid key, insufficient balance/credits, or
-    // an unsupported input parameter for this model — logged (not just
-    // swallowed) so this is actually diagnosable, plus surfaced as a
-    // warning on the result.
-    const message = err instanceof Error ? err.message : "Unknown error";
+    // fal.ai's SDK throws an ApiError with `.status` + `.body` holding the
+    // actual API response (e.g. {"detail": "User is locked. Reason:
+    // Exhausted balance..."} for a 403) — err.message alone is often just a
+    // generic HTTP status summary like "Forbidden", which isn't enough to
+    // diagnose anything. Pull the real body detail out when it's there.
+    const apiErr = err as { status?: number; body?: { detail?: unknown } };
+    const bodyDetail =
+      typeof apiErr?.body?.detail === "string" ? apiErr.body.detail : JSON.stringify(apiErr?.body ?? {});
+    const message =
+      apiErr?.body?.detail || apiErr?.body
+        ? `HTTP ${apiErr.status}: ${bodyDetail}`
+        : err instanceof Error
+          ? err.message
+          : "Unknown error";
     console.error("[generateImage] fal.ai call failed:", message);
     return placeholder(`fal.ai image generation failed, used a placeholder instead: ${message}`);
   }

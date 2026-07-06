@@ -13,7 +13,6 @@
     "validate-agent": "tsx scripts/validate-agent.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.32.1",
     "@circle-fin/developer-controlled-wallets": "^7.0.1",
     "@fontsource/dancing-script": "^5.2.5",
     "@fontsource/montserrat": "^5.2.8",

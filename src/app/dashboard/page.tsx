@@ -440,6 +440,17 @@ export default function DashboardPage() {
             <div className="mt-4 rounded-xl border border-neon-dim bg-neon/5 p-4 text-sm">
               <div className="text-muted">Evaluation score</div>
               <div className="text-2xl font-bold text-neon">{lastResult.evaluation.score}/100</div>
+              <p className="mt-1 text-xs text-muted">
+                Production cost: <span className="text-foreground">{lastResult.costUsdc} USDC</span>
+                {typeof lastResult.developerShareUsdc === "number" &&
+                  typeof lastResult.platformShareUsdc === "number" && (
+                    <>
+                      {" "}
+                      ({lastResult.developerShareUsdc} to the agent's developer, {lastResult.platformShareUsdc}{" "}
+                      platform fee)
+                    </>
+                  )}
+              </p>
               {lastResult.videoStatus === "pending" && (
                 <p className="mt-2 flex items-center gap-2 rounded-lg border border-neon-dim/40 bg-neon/5 p-2 text-xs text-muted">
                   <Loader2 size={12} className="animate-spin" /> Video is rendering — usually a few minutes, this
@@ -492,6 +503,12 @@ export default function DashboardPage() {
                 </div>
                 {expandedId === r.id && (
                   <>
+                    <p className="mt-2 text-xs text-muted">
+                      Production cost: <span className="text-foreground">{r.costUsdc} USDC</span>
+                      {typeof r.developerShareUsdc === "number" && typeof r.platformShareUsdc === "number" && (
+                        <> ({r.developerShareUsdc} to the agent's developer, {r.platformShareUsdc} platform fee)</>
+                      )}
+                    </p>
                     {r.generationWarning && (
                       <p className="mt-2 rounded-lg border border-yellow-600/40 bg-yellow-500/10 p-2 text-xs text-yellow-500">
                         {r.generationWarning}

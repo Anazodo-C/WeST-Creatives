@@ -28,12 +28,12 @@ Circle Gateway (x402). Built for the Canteen x Lepton Hackathon.
   Railway) when `DATABASE_URL` is set — same code path either way (`src/lib/db.ts`).
   Auto-seeded with 5 demo agents on first run.
 
-Every external integration (Circle, Anthropic, Google, ElevenLabs) has a demo
+Every external integration (Circle, OpenRouter, ElevenLabs) has a demo
 fallback, so `npm run dev` is fully clickable with zero keys. Add real keys to
 go live incrementally — nothing needs to be wired all at once. This fallback
-also covers the *real* key failing at runtime, not just being absent — e.g. an
-Anthropic account with a real key but a zero/negative credit balance, an
-expired Google/ElevenLabs key, or a transient network error. Every call site
+also covers the *real* key failing at runtime, not just being absent — e.g. a
+provider account with a real key but a zero/negative credit balance, an
+expired ElevenLabs key, or a transient network error. Every call site
 in `src/lib/agents/` catches these and degrades to its demo-mode output
 (with a note about what failed) rather than throwing an uncaught error up
 into a generic 500 — a briefing shouldn't fail outright just because one
@@ -55,8 +55,7 @@ The SQLite file is created automatically at `.data/vibe.db` on first request.
 |---|---|
 | Circle API key + Entity Secret | console.circle.com → Keys, and Wallets → Entity Secret registration |
 | Arc Testnet USDC (for real transactions) | developers.circle.com/wallets/developer-console-faucet |
-| Anthropic key | console.anthropic.com |
-| OpenRouter key (image + video generation) | openrouter.ai/keys — add prepaid credits at openrouter.ai/credits ($5-10 to start; default image model ~$0.014-0.03/image, default video model ~$0.02/s, see `.env.example`) |
+| OpenRouter key (text/enhancement/evaluation + image + video generation) | openrouter.ai/keys — add prepaid credits at openrouter.ai/credits ($5-10 to start; default text model ~$0.10/$0.40 per 1M tokens, default image model ~$0.014-0.03/image, default video model ~$0.02/s, see `.env.example`) |
 | ElevenLabs key | elevenlabs.io |
 | Resend key (contact form email) | resend.com |
 | WalletConnect project id (optional) | cloud.reown.com |
@@ -258,7 +257,7 @@ database here. The app itself still deploys to Vercel.
 4. Before clicking Deploy, open **Environment Variables** and add every key
    from `.env.example` that you actually have a value for — at minimum
    `DATABASE_URL` (from Railway above) so data persists. Everything else
-   (Circle, Anthropic, Google, ElevenLabs, NextAuth, Resend, WalletConnect)
+   (Circle, OpenRouter, ElevenLabs, NextAuth, Resend, WalletConnect)
    is optional — anything left unset just runs in demo mode, which is safe
    but won't move real funds, call real model APIs, or support real sign-in.
    For `NEXTAUTH_URL`, use your Vercel domain (e.g.

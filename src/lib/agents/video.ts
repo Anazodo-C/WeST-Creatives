@@ -12,10 +12,15 @@
  * time out or hold the function open for minutes billing the whole time), so
  * this never waits for the result inline. It submits the job and returns
  * immediately with the planned storyboard as placeholder output, plus the
- * job's id/polling URL. src/app/api/content/video-status/route.ts does a
- * single status check per call, and the dashboard polls that endpoint every
- * ~8s until the job completes — at which point the storyboard placeholder is
- * swapped for the real rendered video URL.
+ * job's id/polling URL. Two independent things then watch for completion:
+ *  - src/app/api/content/video-status/route.ts: a single status check per
+ *    call, polled by the dashboard every ~8s *while a tab is open* — good
+ *    for near-real-time UI updates.
+ *  - src/app/api/content/video-webhook/route.ts: OpenRouter POSTs here the
+ *    moment the job actually finishes (see callback_url below), so the DB
+ *    record gets updated server-side even if nobody's watching the
+ *    dashboard at that moment — closes the gap where polling depends on a
+ *    browser tab staying open for the (multi-minute) render time.
  */
 import type { BrandProfile } from "@/lib/types";
 import { cleanErrorMessage } from "@/lib/agents/text";
@@ -89,6 +94,13 @@ export async function submitVideoJob(
 
   const prompt = scenes.map((s) => s.description).join(" ");
 
+  // OpenRouter requires the callback_url to be HTTPS — only send it when
+  // NEXT_PUBLIC_APP_URL is actually set to an https:// deployment URL (never
+  // true for local dev against http://localhost, which is fine: the
+  // client-side polling in video-status/route.ts still works there).
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  const callbackUrl = appUrl?.startsWith("https://") ? `${appUrl}/api/content/video-webhook` : undefined;
+
   try {
     const res = await fetch("https://openrouter.ai/api/v1/videos", {
       method: "POST",
@@ -102,6 +114,7 @@ export async function submitVideoJob(
         model: OPENROUTER_VIDEO_MODEL,
         prompt,
         duration: VIDEO_DURATION_SECONDS,
+        ...(callbackUrl ? { callback_url: callbackUrl } : {}),
       }),
     });
 
@@ -203,4 +216,35 @@ export async function pollVideoJob(pollingUrl: string): Promise<VideoPollResult>
     // the dashboard just tries again on its next ~8s interval.
     return { status: "pending", warning: cleanErrorMessage(err) };
   }
+}
+
+export interface VideoWebhookResult {
+  jobId: string;
+  status: "completed" | "failed";
+  url?: string;
+  warning?: string;
+}
+
+/** Parses the payload OpenRouter POSTs to src/app/api/content/video-webhook
+ * when a job reaches a terminal state (video.generation.completed/failed/
+ * cancelled/expired — see the docs section this was built against:
+ * openrouter.ai/docs/guides/overview/multimodal/video-generation#webhooks).
+ * Returns null if the payload doesn't look like a recognizable video-job
+ * event at all (e.g. some unrelated webhook hit this endpoint by mistake). */
+export function interpretVideoWebhookPayload(payload: unknown): VideoWebhookResult | null {
+  const data = (payload as { data?: { id?: string; status?: string; unsigned_urls?: string[]; error?: string } })
+    ?.data;
+  if (!data?.id || !data?.status) return null;
+
+  if (data.status === "completed") {
+    const url = data.unsigned_urls?.[0];
+    if (!url) {
+      return { jobId: data.id, status: "failed", warning: "Video job completed but returned no downloadable URL." };
+    }
+    return { jobId: data.id, status: "completed", url };
+  }
+
+  // failed / cancelled / expired are all terminal failures from this app's
+  // point of view — the storyboard placeholder stays as the output.
+  return { jobId: data.id, status: "failed", warning: data.error ?? `Video job ended with status: ${data.status}` };
 }

@@ -1,27 +1,23 @@
 /**
- * Evaluation layer: LLM-as-judge (Claude) + rubric-based scoring, producing a
- * radar chart of criteria and classifying failure type by modality so the
- * director agent knows where to focus a retry. SigLIP-style embedding
- * similarity is noted as a fast-follow (needs a hosted vision-embedding
- * model) rather than included in this MVP.
+ * Evaluation layer: LLM-as-judge + rubric-based scoring, producing a radar
+ * chart of criteria and classifying failure type by modality so the
+ * director agent knows where to focus a retry. Provider: OpenRouter (same
+ * OPENROUTER_API_KEY as text.ts/image.ts/video.ts) — previously called
+ * Anthropic directly, switched for the same reason as text.ts (Anthropic's
+ * own account credit-balance errors, unrelated to this app's code). SigLIP-
+ * style embedding similarity is noted as a fast-follow (needs a hosted
+ * vision-embedding model) rather than included in this MVP.
  */
 import type { EvaluationResult, EvaluationFailureType } from "@/lib/types";
-import { cleanErrorMessage } from "@/lib/agents/text";
+import { callOpenRouterText, cleanErrorMessage } from "@/lib/agents/text";
 
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-
-async function getAnthropic() {
-  if (!ANTHROPIC_API_KEY) return null;
-  const { default: Anthropic } = await import("@anthropic-ai/sdk");
-  return new Anthropic({ apiKey: ANTHROPIC_API_KEY });
-}
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
 export async function evaluateOutput(params: {
   modality: "text" | "image" | "video" | "audio";
   prompt: string;
   output: string;
 }): Promise<EvaluationResult> {
-  const client = await getAnthropic();
   const rubricCriteria = ["prompt-alignment", "brand-consistency", "quality", "originality"];
 
   function demoEvaluation(note: string): EvaluationResult {
@@ -40,31 +36,21 @@ export async function evaluateOutput(params: {
     };
   }
 
-  if (!client) {
-    return demoEvaluation("(demo evaluation) Set ANTHROPIC_API_KEY for real LLM-as-judge scoring.");
+  if (!OPENROUTER_API_KEY) {
+    return demoEvaluation("(demo evaluation) Set OPENROUTER_API_KEY for real LLM-as-judge scoring.");
   }
 
   let raw: string;
   try {
-    const msg = await client.messages.create({
-      model: "claude-sonnet-4-5",
-      max_tokens: 500,
-      system:
-        'You are an LLM-as-judge for generated content. Score the output 0-100 against the original prompt on these criteria: prompt-alignment, brand-consistency, quality, originality. Reply ONLY as JSON: {"scores": {"prompt-alignment": n, "brand-consistency": n, "quality": n, "originality": n}, "feedback": "one sentence", "failureType": "none|text|image|video|audio|brand-mismatch"}',
-      messages: [
-        {
-          role: "user",
-          content: `Modality: ${params.modality}\nPrompt: ${params.prompt}\nOutput: ${params.output}`,
-        },
-      ],
-    });
-    const block = msg.content.find((c) => c.type === "text");
-    raw = block && block.type === "text" ? block.text : "{}";
+    raw = await callOpenRouterText(
+      'You are an LLM-as-judge for generated content. Score the output 0-100 against the original prompt on these criteria: prompt-alignment, brand-consistency, quality, originality. Reply ONLY as JSON: {"scores": {"prompt-alignment": n, "brand-consistency": n, "quality": n, "originality": n}, "feedback": "one sentence", "failureType": "none|text|image|video|audio|brand-mismatch"}',
+      `Modality: ${params.modality}\nPrompt: ${params.prompt}\nOutput: ${params.output}`,
+      500
+    );
   } catch (err) {
-    // Same reasoning as text.ts: a billing/quota failure on Anthropic's side
-    // (e.g. a 400 "credit balance too low") should degrade this one
-    // evaluation to demo scoring, not fail the entire content-generation
-    // request the evaluation was attached to.
+    // A billing/quota/outage failure on the provider's side should degrade
+    // this one evaluation to demo scoring, not fail the entire
+    // content-generation request the evaluation was attached to.
     return demoEvaluation(
       `(demo evaluation) Real LLM-as-judge call failed, used demo scoring instead: ${cleanErrorMessage(err)}`
     );

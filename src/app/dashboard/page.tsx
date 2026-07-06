@@ -6,9 +6,13 @@ import { useAccount } from "wagmi";
 import { ExternalLink, Wallet, Sparkles, Loader2, Copy, Check, RefreshCw, Download } from "lucide-react";
 import type { ContentRecord } from "@/lib/types";
 
-/** Sniff a data: URI's media type so output can be previewed/downloaded correctly. */
+/** Sniff a data: URI's media type so output can be previewed/downloaded correctly.
+ * Matches any encoding token (";base64,", ";utf8,", etc.) — the demo image
+ * placeholder in particular is a URL-encoded SVG ("data:image/svg+xml;utf8,..."),
+ * not base64, and previously fell through to "text" (downloading as a .txt
+ * file full of URL-escaped SVG markup instead of rendering as an image). */
 function outputMeta(output: string): { kind: "image" | "audio" | "video" | "text"; extension: string } {
-  const match = output.match(/^data:([a-z0-9]+)\/([a-z0-9.+-]+);base64,/i);
+  const match = output.match(/^data:([a-z0-9]+)\/([a-z0-9.+-]+);[a-z0-9-]+,/i);
   if (!match) return { kind: "text", extension: "txt" };
   const [, type, subtype] = match;
   const extension = subtype === "mpeg" ? "mp3" : subtype.split("+")[0] || "bin";

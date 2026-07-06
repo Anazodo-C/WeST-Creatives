@@ -1,10 +1,11 @@
 /**
  * Video agent workflow: plan scenes -> generate scene image -> generate scene
- * video -> evaluate. Provider: Google Veo via @google/generative-ai, with
+ * video -> evaluate. Provider: Google Veo via @google/genai, with
  * Runway/Luma/Kling pluggable behind VIDEO_PROVIDER for teams with those keys
  * instead. Falls back to a text-described storyboard when no key is set —
  * video generation APIs are slow/invite-gated, so MVP always returns a
- * deterministic storyboard description alongside a real call attempt.
+ * deterministic storyboard description; the real call itself isn't wired up
+ * yet (see the single integration point noted below), unlike image.ts.
  */
 import type { BrandProfile } from "@/lib/types";
 

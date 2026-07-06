@@ -1,7 +1,21 @@
 /**
  * Image agent workflow: brand analysis -> design concept -> idea image -> evaluate.
- * Provider: Google Imagen via @google/generative-ai. Falls back to a placeholder
- * data-URI description when GOOGLE_API_KEY is unset.
+ * Provider: Gemini's native image generation ("gemini-2.5-flash-image", aka
+ * Nano Banana) via @google/genai, Google's current unified SDK. Falls back
+ * to a placeholder data-URI description when GOOGLE_API_KEY is unset.
+ *
+ * This used to call Imagen (imagen-3.0-generate-002) via the *old*,
+ * deprecated @google/generative-ai SDK's generateContent() method — but
+ * Imagen models were never callable through generateContent() (they need
+ * the dedicated generateImages() method / a :predict REST endpoint, with a
+ * completely different response shape: response.generatedImages[].image.
+ * imageBytes, not candidates[].content.parts[].inlineData.data), and
+ * imagen-3.0-generate-002 itself has since been shut down. So the "real"
+ * branch here was broken even with a valid key — every real image request
+ * was silently falling back to the placeholder. gemini-2.5-flash-image is
+ * the model that actually matches the generateContent()/inlineData shape
+ * this code expects, so switching to it (rather than switching methods to
+ * chase Imagen) is the smaller, correct fix.
  */
 import type { BrandProfile } from "@/lib/types";
 
@@ -56,30 +70,28 @@ export async function generateImage(
   }
 
   try {
-    const { GoogleGenerativeAI } = await import("@google/generative-ai");
-    const genAI = new GoogleGenerativeAI(GOOGLE_API_KEY);
-    // Imagen generation via Gemini API — model name per Google's current image
-    // generation offering (imagen-3 / gemini image-preview family).
-    const model = genAI.getGenerativeModel({ model: "imagen-3.0-generate-002" });
-    const result = await model.generateContent(compiledPrompt);
-    const response = result.response;
-    const inlineData = response.candidates?.[0]?.content?.parts?.find(
-      (p) => "inlineData" in p
-    );
-    const base64 = (inlineData as { inlineData?: { data?: string } } | undefined)
-      ?.inlineData?.data;
+    const { GoogleGenAI } = await import("@google/genai");
+    const ai = new GoogleGenAI({ apiKey: GOOGLE_API_KEY });
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash-image",
+      contents: compiledPrompt,
+    });
+
+    const part = response.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data);
+    const base64 = part?.inlineData?.data;
+    const mimeType = part?.inlineData?.mimeType || "image/png";
 
     if (!base64) return placeholder();
 
     return {
-      url: `data:image/png;base64,${base64}`,
+      url: `data:${mimeType};base64,${base64}`,
       description: compiledPrompt,
       demo: false,
     };
   } catch {
-    // Common causes: expired/invalid key, quota/billing exhausted, or the
-    // model name not yet enabled on this Google Cloud project — fall back to
-    // the placeholder instead of failing the whole generation request.
+    // Common causes: expired/invalid key, quota/billing exhausted, or image
+    // generation not enabled for this API key/project — fall back to the
+    // placeholder instead of failing the whole generation request.
     return placeholder();
   }
 }

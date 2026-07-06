@@ -98,14 +98,21 @@ export async function generateImage(
       body: JSON.stringify({
         model: OPENROUTER_IMAGE_MODEL,
         messages: [{ role: "user", content: compiledPrompt }],
-        // Required — without this the model responds as plain chat text
-        // with no image at all, same trap as calling Gemini directly.
-        modalities: ["image", "text"],
+        // Pure image-output models (FLUX, Seedream, Riverflow — including
+        // this app's default, flux.2-klein-4b) only ever support
+        // modalities: ["image"]; asking for "text" alongside it gets
+        // rejected with "No endpoints found that support the requested
+        // output modalities: image, text", since no FLUX-family endpoint
+        // returns both. Multimodal chat-native models (Gemini image,
+        // GPT-image) accept ["image"] alone too — they just won't bother
+        // emitting accompanying text, which this app ignores anyway (only
+        // the image is used below) — so ["image"] alone is the one setting
+        // that works across every model family this could be pointed at.
+        modalities: ["image"],
         // Caps OpenRouter's pre-request affordability check to a realistic
-        // ceiling for one image + a short caption instead of the model's
-        // full max output (~65,536 tokens for some Gemini variants) — that
-        // uncapped default is what caused "requires more credits" errors on
-        // a real, positive-but-modest balance.
+        // ceiling for one image instead of some models' full max output
+        // (~65,536 tokens) — that uncapped default is what caused "requires
+        // more credits" errors on a real, positive-but-modest balance.
         max_tokens: 4096,
       }),
     });

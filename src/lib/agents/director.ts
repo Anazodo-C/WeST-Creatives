@@ -11,13 +11,7 @@ import { buildImageAttributes, generateImage } from "@/lib/agents/image";
 import { planScenes, generateVideo } from "@/lib/agents/video";
 import { generateAudio } from "@/lib/agents/audio";
 import { evaluateOutput } from "@/lib/agents/evaluate";
-
-const AGENT_PRICE_USDC: Record<ContentRequest["modality"], number> = {
-  text: 0.02,
-  image: 0.12,
-  video: 0.45,
-  audio: 0.08,
-};
+import { AGENT_PRICE_USDC } from "@/lib/pricing";
 
 export async function runDirector(
   request: ContentRequest,

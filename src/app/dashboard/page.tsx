@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import { useAccount } from "wagmi";
 import { ExternalLink, Wallet, Sparkles, Loader2, Copy, Check, RefreshCw, Download } from "lucide-react";
 import type { ContentRecord } from "@/lib/types";
+import { AGENT_PRICE_USDC } from "@/lib/pricing";
 
 type OutputKind = "image" | "audio" | "video" | "text";
 
@@ -90,7 +91,12 @@ export default function DashboardPage() {
   const [history, setHistory] = useState<ContentRecord[]>([]);
   const [prompt, setPrompt] = useState("");
   const [modality, setModality] = useState<"text" | "image" | "video" | "audio">("text");
-  const [budget, setBudget] = useState(0.5);
+  // Defaults to the selected content type's actual nanopayment cost
+  // (src/lib/pricing.ts) rather than an arbitrary flat guess, and re-syncs
+  // whenever the content type changes (see the effect below) — still fully
+  // editable, this is just a sane starting point so the very first submit
+  // doesn't fail with "Budget too low" for no obvious reason.
+  const [budget, setBudget] = useState(AGENT_PRICE_USDC.text);
   const [brand, setBrand] = useState({
     name: "",
     industry: "",
@@ -105,6 +111,10 @@ export default function DashboardPage() {
   const [balance, setBalance] = useState<string | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setBudget(AGENT_PRICE_USDC[modality]);
+  }, [modality]);
 
   useEffect(() => {
     let oid = localStorage.getItem("vibe.ownerId");
@@ -313,25 +323,36 @@ export default function DashboardPage() {
               className="w-full rounded-xl border border-border-subtle bg-background px-3 py-2 text-sm outline-none focus:border-neon-dim"
             />
             <div className="grid grid-cols-2 gap-3">
-              <select
-                value={modality}
-                onChange={(e) => setModality(e.target.value as typeof modality)}
-                className="rounded-xl border border-border-subtle bg-background px-3 py-2 text-sm outline-none"
-              >
-                <option value="text">Text</option>
-                <option value="image">Image</option>
-                <option value="video">Video</option>
-                <option value="audio">Audio</option>
-              </select>
-              <input
-                type="number"
-                step="0.01"
-                min="0.01"
-                value={budget}
-                onChange={(e) => setBudget(parseFloat(e.target.value))}
-                className="rounded-xl border border-border-subtle bg-background px-3 py-2 text-sm outline-none"
-                placeholder="Budget (USDC)"
-              />
+              <div>
+                <label htmlFor="modality" className="mb-1 block text-xs text-muted">
+                  Content type
+                </label>
+                <select
+                  id="modality"
+                  value={modality}
+                  onChange={(e) => setModality(e.target.value as typeof modality)}
+                  className="w-full rounded-xl border border-border-subtle bg-background px-3 py-2 text-sm outline-none"
+                >
+                  <option value="text">Text</option>
+                  <option value="image">Image</option>
+                  <option value="video">Video</option>
+                  <option value="audio">Audio</option>
+                </select>
+              </div>
+              <div>
+                <label htmlFor="budget" className="mb-1 block text-xs text-muted">
+                  Budget (USDC) — {modality} costs {AGENT_PRICE_USDC[modality]}
+                </label>
+                <input
+                  id="budget"
+                  type="number"
+                  step="0.01"
+                  min={AGENT_PRICE_USDC[modality]}
+                  value={budget}
+                  onChange={(e) => setBudget(parseFloat(e.target.value))}
+                  className="w-full rounded-xl border border-border-subtle bg-background px-3 py-2 text-sm outline-none"
+                />
+              </div>
             </div>
 
             <details className="rounded-xl border border-border-subtle bg-background p-3 text-sm">

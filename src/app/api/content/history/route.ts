@@ -6,7 +6,7 @@ import { getDb } from "@/lib/db";
 // the client never needs it, so it's excluded from this column list rather
 // than `SELECT *`.
 const COLUMNS =
-  "id, creatorId, agentId, modality, prompt, enhancedPrompt, output, evaluationJson, costUsdc, developerShareUsdc, platformShareUsdc, reputationTxHash, reputationWarning, generationWarning, videoJobId, videoStatus, createdAt";
+  "id, creatorId, agentId, modality, batchId, prompt, enhancedPrompt, output, evaluationJson, costUsdc, developerShareUsdc, platformShareUsdc, reputationTxHash, reputationWarning, generationWarning, videoJobId, videoStatus, createdAt";
 
 export async function GET(req: NextRequest) {
   const creatorId = req.nextUrl.searchParams.get("creatorId");

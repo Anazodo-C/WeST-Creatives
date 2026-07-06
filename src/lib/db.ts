@@ -96,6 +96,11 @@ const SCHEMA_SQL = `
     videoJobId TEXT,
     videoPollingUrl TEXT,
     videoStatus TEXT,
+    -- Groups every record produced from one submission — a single-modality
+    -- request gets a batch of one, a "text and image" request shares one
+    -- batchId across both records. See src/lib/agents/director.ts's
+    -- runMultiDirector.
+    batchId TEXT,
     createdAt TEXT NOT NULL
   );
 
@@ -201,6 +206,7 @@ async function initPostgres(connectionString: string): Promise<DbClient> {
     .query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS videoPollingUrl TEXT")
     .catch(() => {});
   await pool.query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS videoStatus TEXT").catch(() => {});
+  await pool.query("ALTER TABLE content_records ADD COLUMN IF NOT EXISTS batchId TEXT").catch(() => {});
 
   const client: DbClient = {
     async get(sql, params = []) {
@@ -264,6 +270,11 @@ async function initSqlite(): Promise<DbClient> {
   }
   try {
     db.exec("ALTER TABLE content_records ADD COLUMN videoStatus TEXT");
+  } catch {
+    // already exists — fine
+  }
+  try {
+    db.exec("ALTER TABLE content_records ADD COLUMN batchId TEXT");
   } catch {
     // already exists — fine
   }

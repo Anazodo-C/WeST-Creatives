@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useAccount } from "wagmi";
 import { ExternalLink, Wallet, Sparkles, Loader2, Copy, Check, RefreshCw, Download } from "lucide-react";
-import type { ContentRecord } from "@/lib/types";
+import type { ContentRecord, ContentModality } from "@/lib/types";
 import { AGENT_PRICE_USDC } from "@/lib/pricing";
 
 type OutputKind = "image" | "audio" | "video" | "text";
+
+const ALL_MODALITIES: ContentModality[] = ["text", "image", "video", "audio"];
 
 /** Sniff a data: URI's media type so output can be previewed/downloaded correctly.
  * Matches any encoding token (";base64,", ";utf8,", etc.) — the demo image
@@ -90,12 +92,24 @@ export default function DashboardPage() {
   const [walletAddress, setWalletAddress] = useState<string>("");
   const [history, setHistory] = useState<ContentRecord[]>([]);
   const [prompt, setPrompt] = useState("");
-  const [modality, setModality] = useState<"text" | "image" | "video" | "audio">("text");
-  // Defaults to the selected content type's actual nanopayment cost
-  // (src/lib/pricing.ts) rather than an arbitrary flat guess, and re-syncs
-  // whenever the content type changes (see the effect below) — still fully
-  // editable, this is just a sane starting point so the very first submit
-  // doesn't fail with "Budget too low" for no obvious reason.
+  // One prompt can fan out to several content types at once (e.g. "write a
+  // caption and make an image ad") — the director enhances the prompt once
+  // and hires a sub-agent per selected type (see runMultiDirector). At
+  // least one must always stay selected; toggleModality below enforces that.
+  const [modalities, setModalities] = useState<ContentModality[]>(["text"]);
+  function toggleModality(m: ContentModality) {
+    setModalities((prev) => {
+      if (prev.includes(m)) {
+        return prev.length > 1 ? prev.filter((x) => x !== m) : prev;
+      }
+      return [...prev, m];
+    });
+  }
+  // Defaults to the sum of the selected content types' actual nanopayment
+  // cost (src/lib/pricing.ts) rather than an arbitrary flat guess, and
+  // re-syncs whenever the selection changes (see the effect below) — still
+  // fully editable, this is just a sane starting point so the very first
+  // submit doesn't fail with "Budget too low" for no obvious reason.
   const [budget, setBudget] = useState(AGENT_PRICE_USDC.text);
   const [brand, setBrand] = useState({
     name: "",
@@ -106,15 +120,17 @@ export default function DashboardPage() {
     colors: "",
   });
   const [generating, setGenerating] = useState(false);
-  const [lastResult, setLastResult] = useState<ContentRecord | null>(null);
+  // Every submission produces a batch of one or more records (one per
+  // selected content type, all sharing a batchId) — see runMultiDirector.
+  const [lastBatch, setLastBatch] = useState<ContentRecord[] | null>(null);
   const [copied, setCopied] = useState(false);
   const [balance, setBalance] = useState<string | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
-    setBudget(AGENT_PRICE_USDC[modality]);
-  }, [modality]);
+    setBudget(+modalities.reduce((sum, m) => sum + AGENT_PRICE_USDC[m], 0).toFixed(6));
+  }, [modalities]);
 
   useEffect(() => {
     let oid = localStorage.getItem("vibe.ownerId");
@@ -174,14 +190,17 @@ export default function DashboardPage() {
   // that takes minutes to render, so a video record comes back from
   // /api/content/generate with videoStatus "pending" and a storyboard
   // placeholder as its output. Poll every ~8s for any record (in history or
-  // the last-result panel) still in that state, and swap in the real video
+  // the last-batch panel) still in that state, and swap in the real video
   // URL once /api/content/video-status reports it's done. Recomputing
   // pendingIds from current state on every render means this also picks up
   // jobs that were already pending when the page loaded (e.g. a refresh
   // mid-render), not just ones submitted in this session.
+  const lastBatchPendingKey = lastBatch?.filter((r) => r.videoStatus === "pending").map((r) => r.id).join(",");
   useEffect(() => {
     const pendingIds = new Set<string>();
-    if (lastResult?.videoStatus === "pending") pendingIds.add(lastResult.id);
+    for (const r of lastBatch ?? []) {
+      if (r.videoStatus === "pending") pendingIds.add(r.id);
+    }
     for (const r of history) {
       if (r.videoStatus === "pending") pendingIds.add(r.id);
     }
@@ -198,7 +217,7 @@ export default function DashboardPage() {
             generationWarning?: string;
           };
           setHistory((h) => h.map((r) => (r.id === id ? { ...r, ...update } : r)));
-          setLastResult((lr) => (lr && lr.id === id ? { ...lr, ...update } : lr));
+          setLastBatch((batch) => batch?.map((r) => (r.id === id ? { ...r, ...update } : r)) ?? batch);
         } catch {
           // Transient network hiccup — next ~8s interval tries again.
         }
@@ -206,7 +225,7 @@ export default function DashboardPage() {
     }, 8000);
 
     return () => clearInterval(interval);
-  }, [lastResult?.id, lastResult?.videoStatus, history]);
+  }, [lastBatchPendingKey, history]);
 
   function handleCopyAddress() {
     if (!walletAddress) return;
@@ -243,7 +262,7 @@ export default function DashboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt,
-          modality,
+          modalities,
           budgetUsdc: budget,
           creatorId: ownerId,
           brand: {
@@ -270,8 +289,9 @@ export default function DashboardPage() {
               : `Request failed (${res.status}).`;
         throw new Error(message);
       }
-      setLastResult(data);
-      setHistory((h) => [data, ...h]);
+      const records: ContentRecord[] = data.records ?? [];
+      setLastBatch(records);
+      setHistory((h) => [...records, ...h]);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -376,37 +396,50 @@ export default function DashboardPage() {
               rows={3}
               className="w-full rounded-xl border border-border-subtle bg-background px-3 py-2 text-sm outline-none focus:border-neon-dim"
             />
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label htmlFor="modality" className="mb-1 block text-xs text-muted">
-                  Content type
-                </label>
-                <select
-                  id="modality"
-                  value={modality}
-                  onChange={(e) => setModality(e.target.value as typeof modality)}
-                  className="w-full rounded-xl border border-border-subtle bg-background px-3 py-2 text-sm outline-none"
-                >
-                  <option value="text">Text</option>
-                  <option value="image">Image</option>
-                  <option value="video">Video</option>
-                  <option value="audio">Audio</option>
-                </select>
+            <div>
+              <div className="mb-1 flex items-center justify-between text-xs text-muted">
+                <span>Content type(s)</span>
+                <span>Select more than one to get multiple outputs from one prompt</span>
               </div>
-              <div>
-                <label htmlFor="budget" className="mb-1 block text-xs text-muted">
-                  Budget (USDC) — {modality} costs {AGENT_PRICE_USDC[modality]}
-                </label>
-                <input
-                  id="budget"
-                  type="number"
-                  step="0.01"
-                  min={AGENT_PRICE_USDC[modality]}
-                  value={budget}
-                  onChange={(e) => setBudget(parseFloat(e.target.value))}
-                  className="w-full rounded-xl border border-border-subtle bg-background px-3 py-2 text-sm outline-none"
-                />
+              <div className="flex flex-wrap gap-2">
+                {ALL_MODALITIES.map((m) => {
+                  const checked = modalities.includes(m);
+                  return (
+                    <label
+                      key={m}
+                      className={`flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs capitalize transition-colors ${
+                        checked
+                          ? "border-neon bg-neon/10 text-neon"
+                          : "border-border-subtle bg-background text-muted hover:text-foreground"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleModality(m)}
+                        className="sr-only"
+                      />
+                      {m} <span className="text-[10px] opacity-70">({AGENT_PRICE_USDC[m]})</span>
+                    </label>
+                  );
+                })}
               </div>
+            </div>
+
+            <div>
+              <label htmlFor="budget" className="mb-1 block text-xs text-muted">
+                Budget (USDC) — {modalities.join(" + ")} costs{" "}
+                {+modalities.reduce((sum, m) => sum + AGENT_PRICE_USDC[m], 0).toFixed(6)} total
+              </label>
+              <input
+                id="budget"
+                type="number"
+                step="0.01"
+                min={+modalities.reduce((sum, m) => sum + AGENT_PRICE_USDC[m], 0).toFixed(6)}
+                value={budget}
+                onChange={(e) => setBudget(parseFloat(e.target.value))}
+                className="w-full rounded-xl border border-border-subtle bg-background px-3 py-2 text-sm outline-none"
+              />
             </div>
 
             <details className="rounded-xl border border-border-subtle bg-background p-3 text-sm">
@@ -436,37 +469,51 @@ export default function DashboardPage() {
             </button>
           </form>
 
-          {lastResult && (
-            <div className="mt-4 rounded-xl border border-neon-dim bg-neon/5 p-4 text-sm">
-              <div className="text-muted">Evaluation score</div>
-              <div className="text-2xl font-bold text-neon">{lastResult.evaluation.score}/100</div>
-              <p className="mt-1 text-xs text-muted">
-                Production cost: <span className="text-foreground">{lastResult.costUsdc} USDC</span>
-                {typeof lastResult.developerShareUsdc === "number" &&
-                  typeof lastResult.platformShareUsdc === "number" && (
-                    <>
-                      {" "}
-                      ({lastResult.developerShareUsdc} to the agent's developer, {lastResult.platformShareUsdc}{" "}
-                      platform fee)
-                    </>
+          {lastBatch && lastBatch.length > 0 && (
+            <div className="mt-4 space-y-3">
+              {lastBatch.length > 1 && (
+                <p className="text-xs text-muted">
+                  {lastBatch.length} outputs generated from this brief:
+                </p>
+              )}
+              {lastBatch.map((record) => (
+                <div key={record.id} className="rounded-xl border border-neon-dim bg-neon/5 p-4 text-sm">
+                  {lastBatch.length > 1 && (
+                    <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-neon">
+                      {record.modality}
+                    </div>
                   )}
-              </p>
-              {lastResult.videoStatus === "pending" && (
-                <p className="mt-2 flex items-center gap-2 rounded-lg border border-neon-dim/40 bg-neon/5 p-2 text-xs text-muted">
-                  <Loader2 size={12} className="animate-spin" /> Video is rendering — usually a few minutes, this
-                  updates automatically.
-                </p>
-              )}
-              {lastResult.generationWarning && (
-                <p className="mt-2 rounded-lg border border-yellow-600/40 bg-yellow-500/10 p-2 text-xs text-yellow-500">
-                  {lastResult.generationWarning}
-                </p>
-              )}
-              <OutputPreview
-                output={lastResult.output}
-                filenameBase={`west-creatives-${lastResult.id}`}
-                modalityHint={lastResult.modality}
-              />
+                  <div className="text-muted">Evaluation score</div>
+                  <div className="text-2xl font-bold text-neon">{record.evaluation.score}/100</div>
+                  <p className="mt-1 text-xs text-muted">
+                    Production cost: <span className="text-foreground">{record.costUsdc} USDC</span>
+                    {typeof record.developerShareUsdc === "number" &&
+                      typeof record.platformShareUsdc === "number" && (
+                        <>
+                          {" "}
+                          ({record.developerShareUsdc} to the agent's developer, {record.platformShareUsdc}{" "}
+                          platform fee)
+                        </>
+                      )}
+                  </p>
+                  {record.videoStatus === "pending" && (
+                    <p className="mt-2 flex items-center gap-2 rounded-lg border border-neon-dim/40 bg-neon/5 p-2 text-xs text-muted">
+                      <Loader2 size={12} className="animate-spin" /> Video is rendering — usually a few minutes,
+                      this updates automatically.
+                    </p>
+                  )}
+                  {record.generationWarning && (
+                    <p className="mt-2 rounded-lg border border-yellow-600/40 bg-yellow-500/10 p-2 text-xs text-yellow-500">
+                      {record.generationWarning}
+                    </p>
+                  )}
+                  <OutputPreview
+                    output={record.output}
+                    filenameBase={`west-creatives-${record.id}`}
+                    modalityHint={record.modality}
+                  />
+                </div>
+              ))}
             </div>
           )}
         </div>

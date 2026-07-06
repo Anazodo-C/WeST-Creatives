@@ -47,9 +47,28 @@ export interface BrandProfile {
   stylePrefix?: string;
 }
 
+// Named distinctly from AgentMetadata's `Modality` field above ("unimodal" |
+// "cross-modal" | "multi-modal", describing an *agent's* modality shape) —
+// this is the actual content type a creator is generating.
+export type ContentModality = "text" | "image" | "video" | "audio";
+
 export interface ContentRequest {
   prompt: string;
-  modality: "text" | "image" | "video" | "audio";
+  modality: ContentModality;
+  budgetUsdc: number;
+  brand?: Partial<BrandProfile>;
+  creatorId: string;
+}
+
+/** A single prompt fanned out to multiple sub-agents at once (e.g. "text and
+ * image") — see src/lib/agents/director.ts's runMultiDirector. `modality`
+ * above (ContentRequest) still exists for single-modality requests/callers;
+ * runDirector() is now a thin wrapper over runMultiDirector with a
+ * one-element modalities array, so both shapes produce identical results
+ * for the single-modality case. */
+export interface MultiContentRequest {
+  prompt: string;
+  modalities: ContentModality[];
   budgetUsdc: number;
   brand?: Partial<BrandProfile>;
   creatorId: string;
@@ -75,7 +94,12 @@ export interface ContentRecord {
   id: string;
   creatorId: string;
   agentId: string;
-  modality: "text" | "image" | "video" | "audio";
+  modality: ContentModality;
+  // Shared by every record produced from the same submission — a
+  // single-modality request gets a batch of one, a "text and image" request
+  // gets two records with the same batchId, so the dashboard can group them
+  // as one creative brief's worth of outputs. See runMultiDirector.
+  batchId: string;
   prompt: string;
   enhancedPrompt: string;
   output: string;

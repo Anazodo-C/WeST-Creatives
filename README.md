@@ -56,7 +56,8 @@ The SQLite file is created automatically at `.data/vibe.db` on first request.
 | Circle API key + Entity Secret | console.circle.com → Keys, and Wallets → Entity Secret registration |
 | Arc Testnet USDC (for real transactions) | developers.circle.com/wallets/developer-console-faucet |
 | Anthropic key | console.anthropic.com |
-| Google API key (Gemini image gen + Veo) | aistudio.google.com |
+| fal.ai key (image generation) | fal.ai/dashboard/keys |
+| Google API key (Veo video, not yet wired) | aistudio.google.com |
 | ElevenLabs key | elevenlabs.io |
 | Resend key (contact form email) | resend.com |
 | WalletConnect project id (optional) | cloud.reown.com |

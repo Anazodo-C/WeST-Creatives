@@ -6,27 +6,51 @@ import { useAccount } from "wagmi";
 import { ExternalLink, Wallet, Sparkles, Loader2, Copy, Check, RefreshCw, Download } from "lucide-react";
 import type { ContentRecord } from "@/lib/types";
 
+type OutputKind = "image" | "audio" | "video" | "text";
+
 /** Sniff a data: URI's media type so output can be previewed/downloaded correctly.
  * Matches any encoding token (";base64,", ";utf8,", etc.) — the demo image
  * placeholder in particular is a URL-encoded SVG ("data:image/svg+xml;utf8,..."),
  * not base64, and previously fell through to "text" (downloading as a .txt
- * file full of URL-escaped SVG markup instead of rendering as an image). */
-function outputMeta(output: string): { kind: "image" | "audio" | "video" | "text"; extension: string } {
-  const match = output.match(/^data:([a-z0-9]+)\/([a-z0-9.+-]+);[a-z0-9-]+,/i);
-  if (!match) return { kind: "text", extension: "txt" };
-  const [, type, subtype] = match;
-  const extension = subtype === "mpeg" ? "mp3" : subtype.split("+")[0] || "bin";
-  if (type === "image" || type === "audio" || type === "video") {
-    return { kind: type, extension };
+ * file full of URL-escaped SVG markup instead of rendering as an image).
+ *
+ * Some providers (e.g. fal.ai, if sync_mode isn't honored for a given model)
+ * return a hosted https:// URL instead of a data: URI — for those, fall back
+ * to the caller-supplied modality instead of misreading them as plain text. */
+function outputMeta(output: string, modalityHint?: OutputKind): { kind: OutputKind; extension: string } {
+  const dataMatch = output.match(/^data:([a-z0-9]+)\/([a-z0-9.+-]+);[a-z0-9-]+,/i);
+  if (dataMatch) {
+    const [, type, subtype] = dataMatch;
+    const extension = subtype === "mpeg" ? "mp3" : subtype.split("+")[0] || "bin";
+    if (type === "image" || type === "audio" || type === "video") {
+      return { kind: type, extension };
+    }
+    return { kind: "text", extension: "txt" };
   }
+
+  if (/^https?:\/\//i.test(output) && modalityHint && modalityHint !== "text") {
+    const lastSegment = output.split(/[?#]/)[0].split(".").pop() ?? "";
+    const extension = /^[a-z0-9]{2,4}$/i.test(lastSegment) ? lastSegment : { image: "png", audio: "mp3", video: "mp4" }[modalityHint];
+    return { kind: modalityHint, extension };
+  }
+
   return { kind: "text", extension: "txt" };
 }
 
 /** Renders generated content with an actual preview + a real download link — for
- * data: URI outputs (image/audio/video) that used to just show
+ * data: URI or hosted-URL outputs (image/audio/video) that used to just show
  * "(binary output generated)" with no way to see or save them. */
-function OutputPreview({ output, filenameBase }: { output: string; filenameBase: string }) {
-  const meta = outputMeta(output);
+function OutputPreview({
+  output,
+  filenameBase,
+  modalityHint,
+}: {
+  output: string;
+  filenameBase: string;
+  modalityHint?: OutputKind;
+}) {
+  const meta = outputMeta(output, modalityHint);
+  const isHostedUrl = /^https?:\/\//i.test(output);
   const downloadHref = meta.kind === "text" ? `data:text/plain;charset=utf-8,${encodeURIComponent(output)}` : output;
   const filename = `${filenameBase}.${meta.extension}`;
 
@@ -47,6 +71,8 @@ function OutputPreview({ output, filenameBase }: { output: string; filenameBase:
       <a
         href={downloadHref}
         download={filename}
+        target={isHostedUrl ? "_blank" : undefined}
+        rel={isHostedUrl ? "noreferrer" : undefined}
         className="inline-flex items-center gap-1 text-xs text-neon hover:underline"
       >
         <Download size={12} /> Download {meta.kind === "text" ? "as .txt" : meta.kind}
@@ -344,7 +370,11 @@ export default function DashboardPage() {
                   {lastResult.generationWarning}
                 </p>
               )}
-              <OutputPreview output={lastResult.output} filenameBase={`west-creatives-${lastResult.id}`} />
+              <OutputPreview
+                output={lastResult.output}
+                filenameBase={`west-creatives-${lastResult.id}`}
+                modalityHint={lastResult.modality}
+              />
             </div>
           )}
         </div>
@@ -378,7 +408,11 @@ export default function DashboardPage() {
                         {r.generationWarning}
                       </p>
                     )}
-                    <OutputPreview output={r.output} filenameBase={`west-creatives-${r.id}`} />
+                    <OutputPreview
+                      output={r.output}
+                      filenameBase={`west-creatives-${r.id}`}
+                      modalityHint={r.modality}
+                    />
                   </>
                 )}
               </div>

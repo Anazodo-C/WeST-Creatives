@@ -135,17 +135,39 @@ export async function settlePaymentSplit(params: {
     // `developerShare` to developerWalletAddress and `platformShare` to
     // platformWalletAddress, gaslessly, sub-cent precision. See:
     // https://developers.circle.com/gateway/nanopayments
+    //
+    // tokenAddress: "" + blockchain: "ARC-TESTNET" (NOT tokenId) is
+    // deliberate: Circle's createTransaction takes either a `tokenId` (a
+    // token registered in Circle's system under an id) OR a
+    // `tokenAddress`+`blockchain` pair for a native-currency transfer —
+    // these are mutually exclusive per Circle's own API (tokenId is typed
+    // `never` on the address+blockchain variant and vice versa). Arc
+    // Testnet's native gas token *is* USDC (see getNativeUsdcBalance in
+    // src/lib/arc.ts — the balance the dashboard displays is a plain RPC
+    // read of native balance, no ERC-20 contract involved), so there is no
+    // separate "USDC token id" to register or transfer here. Previously
+    // this passed `tokenId: process.env.ARC_USDC_TOKEN_ID` (always unset,
+    // since no such token id exists for a native asset), which silently
+    // sent Circle a request with neither a valid tokenId nor the required
+    // blockchain field — Circle rejected it every time, the failure was
+    // swallowed by the catch block below, and the "real" balance (read via
+    // viem straight from the chain) never moved even with valid API keys.
+    // `as never` matches the existing cast pattern in this file for Arc's
+    // blockchain literal (see createWallets/executeContractCall below) —
+    // the published SDK types haven't caught up to Arc yet.
     const [dev, plat] = await Promise.all([
       client.createTransaction({
         walletId: params.fromWalletId,
-        tokenId: process.env.ARC_USDC_TOKEN_ID,
+        tokenAddress: "",
+        blockchain: "ARC-TESTNET",
         destinationAddress: params.developerWalletAddress,
         amount: [developerShare.toString()],
         fee: { type: "level", config: { feeLevel: "MEDIUM" } },
       } as never),
       client.createTransaction({
         walletId: params.fromWalletId,
-        tokenId: process.env.ARC_USDC_TOKEN_ID,
+        tokenAddress: "",
+        blockchain: "ARC-TESTNET",
         destinationAddress: params.platformWalletAddress,
         amount: [platformShare.toString()],
         fee: { type: "level", config: { feeLevel: "MEDIUM" } },
@@ -158,8 +180,9 @@ export async function settlePaymentSplit(params: {
       demo: false,
     };
   } catch (err) {
-    // Common causes on testnet: empty USDC balance, wrong token id, or a
-    // walletId that was never a real Circle wallet (e.g. guest sessions).
+    // Common causes on testnet: empty native-USDC balance on fromWalletId
+    // (nothing to send), or a walletId that was never a real Circle wallet
+    // (e.g. guest sessions).
     return {
       demo: true,
       warning: err instanceof Error ? err.message : "Settlement failed, recorded as unsettled.",
@@ -203,9 +226,17 @@ export async function debitRefillReserve(params: {
   }
 
   try {
+    // Native-currency transfer (tokenAddress: "" + blockchain), not a
+    // tokenId transfer — see the matching comment in settlePaymentSplit
+    // above for why: Arc Testnet's native gas token *is* USDC, so there's
+    // no separate token id to transfer. The previous `tokenId:
+    // process.env.ARC_USDC_TOKEN_ID` was always unset and silently failed
+    // Circle's validation on every call, which is exactly why this debit
+    // never showed up as a real balance change even when triggered.
     const tx = await client.createTransaction({
       walletId: params.reserveWalletId,
-      tokenId: process.env.ARC_USDC_TOKEN_ID,
+      tokenAddress: "",
+      blockchain: "ARC-TESTNET",
       destinationAddress: platformAddress,
       amount: [params.amountUsdc.toString()],
       fee: { type: "level", config: { feeLevel: "MEDIUM" } },

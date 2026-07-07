@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import { ExternalLink, Wallet, Copy, Check, RefreshCw } from "lucide-react";
+import { useAccount } from "wagmi";
+import { ExternalLink, Wallet, Copy, Check, RefreshCw, Loader2 } from "lucide-react";
 import CreatorDashboard from "@/components/CreatorDashboard";
 import DeveloperDashboard from "@/components/DeveloperDashboard";
 
@@ -17,8 +18,10 @@ import DeveloperDashboard from "@/components/DeveloperDashboard";
  */
 export default function DashboardPage() {
   const { data: session } = useSession();
+  const { address, isConnected } = useAccount();
   const [ownerId, setOwnerId] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
+  const [roleResolving, setRoleResolving] = useState(false);
   const [walletAddress, setWalletAddress] = useState<string>("");
   const [copied, setCopied] = useState(false);
   const [balance, setBalance] = useState<string | null>(null);
@@ -34,6 +37,19 @@ export default function DashboardPage() {
     if (!oid && session?.user?.email) {
       oid = `google-${session.user.email}`;
       r = r ?? "creator";
+    }
+
+    // Same idea for a connected wallet: `wallet-${address}` is exactly the
+    // ownerId src/app/signup/page.tsx would have created, so a wallet
+    // reconnecting on a new browser/device/profile — or after localStorage
+    // was cleared for any reason (including a genuine disconnect elsewhere,
+    // see WalletSessionSync) — resolves back to the SAME account and its
+    // existing agents/history instead of looking like a brand-new, empty
+    // one. Unlike Google, role can't be assumed here (a wallet account can
+    // be either a creator or a developer) — it's resolved from the backend
+    // just below instead of defaulted.
+    if (!oid && isConnected && address) {
+      oid = `wallet-${address}`;
     }
 
     setOwnerId(oid);
@@ -54,8 +70,30 @@ export default function DashboardPage() {
         .catch(() => {
           // Non-critical — the wallet card just keeps showing the placeholder.
         });
+
+      // Role wasn't in localStorage (the wallet-reconnect case above, or
+      // any other path that landed here without ever setting it) — ask the
+      // backend which kind of agent this ownerId actually owns rather than
+      // guessing, so a returning developer's wallet doesn't get defaulted
+      // into the creator view and appear to have "lost" their agent.
+      if (!r) {
+        setRoleResolving(true);
+        fetch(`/api/account/role?ownerId=${encodeURIComponent(oid)}`)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((d: { role?: "creator" | "developer" | null } | null) => {
+            const resolvedRole = d?.role ?? "creator";
+            setRole(resolvedRole);
+            localStorage.setItem("vibe.ownerId", oid!);
+            localStorage.setItem("vibe.role", resolvedRole);
+          })
+          .catch(() => {
+            // Non-critical — falls back to showing the creator view below,
+            // same as if this lookup had returned no agents at all.
+          })
+          .finally(() => setRoleResolving(false));
+      }
     }
-  }, [session?.user?.email]);
+  }, [session?.user?.email, isConnected, address]);
 
   async function fetchBalance(address: string) {
     setBalanceLoading(true);
@@ -164,7 +202,15 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {role === "developer" ? <DeveloperDashboard ownerId={ownerId} /> : <CreatorDashboard ownerId={ownerId} />}
+      {!role && roleResolving ? (
+        <div className="mt-10 flex items-center justify-center gap-2 text-muted">
+          <Loader2 size={16} className="animate-spin" /> Loading your account…
+        </div>
+      ) : role === "developer" ? (
+        <DeveloperDashboard ownerId={ownerId} />
+      ) : (
+        <CreatorDashboard ownerId={ownerId} />
+      )}
     </div>
   );
 }

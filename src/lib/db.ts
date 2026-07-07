@@ -313,10 +313,31 @@ async function initPostgres(connectionString: string): Promise<DbClient> {
       ALTER TABLE content_records ADD COLUMN IF NOT EXISTS batchId TEXT;
       ALTER TABLE content_records ADD COLUMN IF NOT EXISTS reserveDebitTxHash TEXT;
       ALTER TABLE content_records ADD COLUMN IF NOT EXISTS reserveDebitWarning TEXT;
+
+      -- Reconciles agents.transactionCount against the real number of rows
+      -- in content_records for that agent — the actual source of truth for
+      -- "how many times has this agent genuinely been hired". Needed
+      -- because seedIfEmpty() used to seed brand-new demo agents with a
+      -- random placeholder transactionCount (Math.floor(Math.random() *
+      -- 400) + 20) purely so the marketplace didn't look empty on first
+      -- load — that random number then sat in the column indefinitely,
+      -- since /api/content/generate's real per-request increment
+      -- (transactionCount = transactionCount + 1) only ever added to
+      -- whatever was already there. This UPDATE overwrites it with the
+      -- genuine count every time this runs, so any inflated/stale value —
+      -- past or future, from this bug or any other drift — self-corrects
+      -- instead of needing a one-off manual fix. Cheap (a single
+      -- correlated-subquery UPDATE over a small table) and safe to re-run
+      -- on every cold start, unlike the sequential-round-trip problem the
+      -- ALTER batch above solves for.
+      UPDATE agents SET transactionCount = (
+        SELECT COUNT(*) FROM content_records WHERE content_records.agentId = agents.id
+      );
     `
     )
     .catch(() => {
-      // Swallow rather than throw — every statement is IF NOT EXISTS so a
+      // Swallow rather than throw — every statement is IF NOT EXISTS (or, for
+      // the transactionCount reconciliation below, safely re-runnable) so a
       // real failure here would mean the connection itself is broken, which
       // the very next query (seedIfEmpty, or the first real caller) will
       // surface clearly anyway.
@@ -402,6 +423,14 @@ async function initSqlite(): Promise<DbClient> {
   } catch {
     // already exists — fine
   }
+
+  // Same reconciliation as initPostgres above — see the comment there for
+  // why this exists (seedIfEmpty() used to seed brand-new agents with a
+  // random placeholder transactionCount that never got corrected). Cheap
+  // enough to run unconditionally on every local dev restart too.
+  db.exec(
+    "UPDATE agents SET transactionCount = (SELECT COUNT(*) FROM content_records WHERE content_records.agentId = agents.id)"
+  );
 
   const client: DbClient = {
     // node:sqlite's DatabaseSync is synchronous under the hood; wrapped in
@@ -689,7 +718,17 @@ async function seedIfEmpty(db: DbClient) {
           a.generationParadigm,
           rank,
           a.score,
-          Math.floor(Math.random() * 400) + 20,
+          // Genuinely zero, not a randomized placeholder — a freshly seeded
+          // agent hasn't actually been hired yet. Previously this was
+          // `Math.floor(Math.random() * 400) + 20`, a fake number meant to
+          // make the marketplace look populated on first load, but it sat
+          // in the column indefinitely (the real per-request increment in
+          // /api/content/generate only ever added to it) and was never
+          // reconciled against actual usage — see the transactionCount
+          // reconciliation UPDATE in initPostgres/initSqlite above, which
+          // now also self-corrects any already-inflated rows from before
+          // this fix.
+          0,
           a.price,
           null,
           now,

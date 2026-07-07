@@ -101,6 +101,7 @@ export async function runMultiDirector(
     } else {
       const audio = await generateAudio(enhancedPrompt, request.brand, agent.model);
       output = audio.url || audio.script;
+      generationWarning = audio.warning;
     }
 
     const evaluation = await evaluateOutput({ modality, prompt: enhancedPrompt, output });

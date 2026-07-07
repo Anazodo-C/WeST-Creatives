@@ -5,14 +5,15 @@
  * actual underlying provider cost per item, plus a small margin, rather
  * than arbitrary round numbers:
  *
- *   - text:  a few cents of Claude token usage at most (src/lib/agents/text.ts)
+ *   - text:  OpenRouter's gemini-2.5-flash-lite, a few cents of token usage
+ *            at most (src/lib/agents/text.ts)
  *   - image: OpenRouter's flux.2-klein-4b, ~$0.014-0.03/image
  *            (src/lib/agents/image.ts)
- *   - video: still a storyboard stub, no real render yet
- *            (src/lib/agents/video.ts) — priced a bit ahead of the others
- *            since real video generation costs meaningfully more once wired up
- *   - audio: ElevenLabs' usage-based pricing for a short clip
- *            (src/lib/agents/audio.ts)
+ *   - video: OpenRouter's async video job API, priced a bit ahead of the
+ *            others since real video generation costs meaningfully more
+ *            per request (src/lib/agents/video.ts)
+ *   - audio: OpenRouter's TTS endpoint, per-character/token pricing for a
+ *            short clip (src/lib/agents/audio.ts)
  *
  * Deliberately has zero external/server-only dependencies so it's safe to
  * import from both the server-side director (src/lib/agents/director.ts)

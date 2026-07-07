@@ -9,7 +9,8 @@
  * actually knows how to call (src/lib/agents/{image,video,audio,text}.ts)
  * or already runs live in the seed roster (src/lib/db.ts's demoAgents), not
  * an arbitrary catalog. Deliberately NOT exhaustive — OpenRouter alone
- * supports hundreds of models, and ElevenLabs adds more of its own — so the
+ * supports hundreds of models across every modality (including audio/TTS,
+ * see openrouter.ai/collections/text-to-speech-models) — so the
  * registration form always keeps an "Other" escape hatch (a free-text
  * input) for any model slug not listed here. This file is a curated
  * shortlist to make the common case a dropdown, not a hard restriction on
@@ -36,9 +37,9 @@ export const MODELS_BY_TYPE: Record<AgentType, ModelOption[]> = {
     { id: "google/veo-3.1", label: "Veo 3.1 — premium quality (~$0.63/s)" },
   ],
   audio: [
-    { id: "eleven_multilingual_v2", label: "ElevenLabs Multilingual v2 — highest quality" },
-    { id: "eleven_turbo_v2_5", label: "ElevenLabs Turbo v2.5 — balanced speed/quality" },
-    { id: "eleven_flash_v2_5", label: "ElevenLabs Flash v2.5 — fastest & cheapest" },
+    { id: "google/gemini-3.1-flash-tts-preview", label: "Gemini 3.1 Flash TTS — premium, emotion tags, 70+ languages" },
+    { id: "openai/gpt-4o-mini-tts-2025-12-15", label: "GPT-4o Mini TTS — balanced cost/quality" },
+    { id: "hexgrad/kokoro-82m", label: "Kokoro 82M — lightweight, cheapest" },
   ],
   text: [
     { id: "google/gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite — cheap, large context" },

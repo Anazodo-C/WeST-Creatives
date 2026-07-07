@@ -475,10 +475,16 @@ async function initSqlite(): Promise<DbClient> {
  *     google/veo-3.1 (OpenRouter's own Video Generation doc's canonical
  *     example model, ~$0.50-0.75/video-second — a genuinely pricier,
  *     higher-quality tier, not just a relabeled duplicate).
- *   - audio: three distinct ElevenLabs model_ids (not OpenRouter — audio.ts
- *     calls ElevenLabs directly), each a real, stable ElevenLabs model:
- *     eleven_multilingual_v2 (quality narration), eleven_turbo_v2_5 (fast/
- *     cheap), eleven_flash_v2_5 (lowest-latency, cheapest).
+ *   - audio: three distinct OpenRouter TTS models (POST
+ *     /api/v1/audio/speech — see openrouter.ai/collections/
+ *     text-to-speech-models), each independently verified: google/
+ *     gemini-3.1-flash-tts-preview (premium — 70+ languages, inline
+ *     emotion/delivery tags, multi-speaker), openai/gpt-4o-mini-tts-2025-
+ *     12-15 (balanced cost/quality), hexgrad/kokoro-82m (lightweight,
+ *     cheapest). Previously three ElevenLabs model ids called directly —
+ *     switched to consolidate onto the same OPENROUTER_API_KEY/billing
+ *     relationship every other modality already uses (see the module
+ *     comment in src/lib/agents/audio.ts).
  */
 const demoAgents = [
   {
@@ -562,15 +568,20 @@ const demoAgents = [
     price: 2.5,
   },
   // ---- audio ----
+  // All three now generate via OpenRouter's TTS endpoint (POST
+  // /api/v1/audio/speech), not ElevenLabs directly — see the module
+  // comment in src/lib/agents/audio.ts for why (one consolidated
+  // OpenRouter billing relationship instead of a separate ElevenLabs
+  // account that could run out of its own credits independently).
   {
     name: "Echo Voice",
     type: "audio",
-    description: "Natural narration and dialogue with a consistent voice profile.",
-    model: "eleven_multilingual_v2",
+    description: "Expressive narration and dialogue with emotion/delivery control across 70+ languages.",
+    model: "google/gemini-3.1-flash-tts-preview",
     modality: "unimodal",
     scope: "specialized",
     generationParadigm: "auto-regressive",
-    capabilities: ["dialogue", "voice-consistency", "multilingual"],
+    capabilities: ["dialogue", "voice-consistency", "multilingual", "emotion-tags"],
     niche: "podcast & narration",
     score: 89,
     price: 0.08,
@@ -579,7 +590,7 @@ const demoAgents = [
     name: "Turbo Teller",
     type: "audio",
     description: "Fast, cheap voiceover for quick social clips — lower fidelity than Echo Voice.",
-    model: "eleven_turbo_v2_5",
+    model: "openai/gpt-4o-mini-tts-2025-12-15",
     modality: "unimodal",
     scope: "specialized",
     generationParadigm: "auto-regressive",
@@ -592,7 +603,7 @@ const demoAgents = [
     name: "Flash Bark",
     type: "audio",
     description: "Ultra-low-latency stingers and sound effects — cheapest audio tier.",
-    model: "eleven_flash_v2_5",
+    model: "hexgrad/kokoro-82m",
     modality: "unimodal",
     scope: "specialized",
     generationParadigm: "auto-regressive",

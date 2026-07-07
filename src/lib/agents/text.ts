@@ -43,8 +43,9 @@ function buildBrandContext(brand?: Partial<BrandProfile>): string {
 /** OpenRouter's top-level error.message is often a generic wrapper for a
  * failure that actually originated with the underlying provider — same
  * reasoning as image.ts/video.ts. Real detail (if captured) lives nested
- * under error.metadata. */
-function extractOpenRouterError(json: unknown, fallback: string): string {
+ * under error.metadata. Exported so audio.ts's OpenRouter TTS calls can
+ * reuse the same extraction instead of duplicating it. */
+export function extractOpenRouterError(json: unknown, fallback: string): string {
   const errObj = (json as { error?: { message?: string; metadata?: { raw?: unknown } } } | null)?.error;
   const rawDetail =
     typeof errObj?.metadata?.raw === "string"
